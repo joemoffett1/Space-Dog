@@ -1,16 +1,21 @@
 import { useEffect, useState } from 'react'
 import { getCatalogSyncStatus, getSyncDiagnostics } from '../lib/catalogSync'
+import type { LocalAuthStatus } from '../lib/localAuth'
 import { clearPerfMetrics, getPerfMetrics } from '../lib/perfMetrics'
 import type { Profile } from '../types'
 
 interface SettingsPageProps {
   activeProfile: Profile
   onReturnToCollection: () => void
+  localAuthStatus: LocalAuthStatus
+  onMarkLocalAuthSynced: () => void
 }
 
 export function SettingsPage({
   activeProfile,
   onReturnToCollection,
+  localAuthStatus,
+  onMarkLocalAuthSynced,
 }: SettingsPageProps) {
   const [syncStatusLine, setSyncStatusLine] = useState('Loading sync state...')
   const [diagnostics, setDiagnostics] = useState(getSyncDiagnostics())
@@ -86,6 +91,31 @@ export function SettingsPage({
           </ul>
           <button className="button" onClick={onReturnToCollection} type="button">
             Back to Collection
+          </button>
+        </article>
+
+        <article className="report-card">
+          <h3>Local Account</h3>
+          <p className="muted">
+            Status: {localAuthStatus.signedIn ? 'Signed In' : 'Signed Out'}
+          </p>
+          <p className="muted">User: {localAuthStatus.username ?? 'N/A'}</p>
+          <p className="muted">
+            Cloud sync: {localAuthStatus.syncPending ? 'Pending' : 'Synced'}
+          </p>
+          <p className="muted">
+            Last cloud sync:{' '}
+            {localAuthStatus.lastSyncedAt
+              ? new Date(localAuthStatus.lastSyncedAt).toLocaleString()
+              : 'Never'}
+          </p>
+          <button
+            className="button subtle"
+            type="button"
+            onClick={onMarkLocalAuthSynced}
+            disabled={!localAuthStatus.syncPending}
+          >
+            Mark Local Auth Synced
           </button>
         </article>
 

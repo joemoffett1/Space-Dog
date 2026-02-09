@@ -13,7 +13,7 @@ function formatUsd(value: number): string {
 export function ReportsPage({ cards }: ReportsPageProps) {
   const [isLoadingCk, setIsLoadingCk] = useState(false)
   const [ckWarning, setCkWarning] = useState('')
-  const [ckProvider, setCkProvider] = useState<'mock' | 'api' | 'disabled'>('disabled')
+  const [ckProvider, setCkProvider] = useState<'mock' | 'api' | 'disabled' | 'public'>('disabled')
   const [ckEnabled, setCkEnabled] = useState(false)
   const [ckQuotes, setCkQuotes] = useState<
     Array<{

@@ -8,6 +8,24 @@ Versioning policy for alpha:
 - Increment `patch` (`x` in `1.0.x-alpha`) for updates/fixes to existing features.
 - Use engineering discretion on feature vs update.
 
+## [1.15.0-alpha] - 2026-02-09
+### Added
+- Added offline-first local account login gate before collection profile access:
+- local account register/sign-in UI in `magiccollection-desktop/src/components/LocalAuthGate.tsx`
+- local sign-out action in header
+- local auth status surfaced in Settings with `syncPending` visibility
+- Added direct Card Kingdom public buylist integration in Tauri backend:
+- `get_ck_buylist_quotes` command now fetches and caches CK public pricelist (12h cache)
+- Reports buylist provider now supports `public` mode
+- Added Cloudflare deployment scaffold for sync service:
+- `sync-service/cloudflare/src/worker.ts`
+- `sync-service/cloudflare/wrangler.toml.example`
+- `sync-service/cloudflare/README.md`
+
+### Changed
+- `ReportsPage` provider typing expanded to include `public`.
+- Sync service docs now include Cloudflare Worker + R2 hosting path.
+
 ## [1.14.0-alpha] - 2026-02-09
 ### Added
 - Added cross-platform handoff scaffolding docs:

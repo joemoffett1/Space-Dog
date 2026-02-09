@@ -665,6 +665,17 @@ th {
   color: var(--ink);
 }
 
+.create-wizard input,
+.create-wizard textarea,
+.unlock-form input {
+  width: 100%;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 0.6rem 0.72rem;
+  background: rgba(7, 14, 41, 0.86);
+  color: var(--ink);
+}
+
 .market-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));

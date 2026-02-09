@@ -1,0 +1,11 @@
+name = "magiccollection-sync"
+main = "src/worker.ts"
+compatibility_date = "2026-02-09"
+workers_dev = true
+
+[vars]
+SYNC_PREFIX = "sync"
+
+[[r2_buckets]]
+binding = "SYNC_BUCKET"
+bucket_name = "magiccollection-sync"

@@ -1,4 +1,5 @@
-﻿import type { OwnedCard } from '../types'
+﻿import { invoke } from '@tauri-apps/api/core'
+import type { OwnedCard } from '../types'
 
 export interface CkQuote {
   scryfallId: string
@@ -12,13 +13,17 @@ export interface CkQuote {
 
 export interface CkQuoteResult {
   enabled: boolean
-  provider: 'mock' | 'api' | 'disabled'
+  provider: 'mock' | 'api' | 'disabled' | 'public'
   quotes: CkQuote[]
   warning?: string
 }
 
 function hasWindow(): boolean {
   return typeof window !== 'undefined'
+}
+
+function hasTauriRuntime(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
 
 function readLocalFlag(key: string): string {
@@ -55,7 +60,8 @@ async function fetchApiQuotes(endpoint: string, cards: OwnedCard[]): Promise<CkQ
       items: cards.map((card) => ({
         scryfallId: card.scryfallId,
         name: card.name,
-        quantity: card.quantity + card.foilQuantity,
+        quantity: card.quantity,
+        foilQuantity: card.foilQuantity,
       })),
     }),
   })
@@ -68,6 +74,7 @@ async function fetchApiQuotes(endpoint: string, cards: OwnedCard[]): Promise<CkQ
     quotes?: Array<{
       scryfallId: string
       name: string
+      quantity: number
       cashPrice: number
       creditPrice: number
       qtyCap: number
@@ -78,12 +85,23 @@ async function fetchApiQuotes(endpoint: string, cards: OwnedCard[]): Promise<CkQ
   return (payload.quotes ?? []).map((quote) => ({
     scryfallId: quote.scryfallId,
     name: quote.name,
-    quantity: cards.find((card) => card.scryfallId === quote.scryfallId)?.quantity ?? 0,
+    quantity: Math.max(0, Math.floor(quote.quantity || 0)),
     cashPrice: asUsd(quote.cashPrice),
     creditPrice: asUsd(quote.creditPrice),
     qtyCap: Math.max(0, Math.floor(quote.qtyCap || 0)),
     sourceUrl: quote.sourceUrl || 'https://www.cardkingdom.com/',
   }))
+}
+
+async function fetchPublicCkQuotes(cards: OwnedCard[]): Promise<CkQuote[]> {
+  return invoke<CkQuote[]>('get_ck_buylist_quotes', {
+    items: cards.map((card) => ({
+      scryfallId: card.scryfallId,
+      name: card.name,
+      quantity: card.quantity,
+      foilQuantity: card.foilQuantity,
+    })),
+  })
 }
 
 function buildMockQuotes(cards: OwnedCard[]): CkQuote[] {
@@ -112,20 +130,30 @@ function buildMockQuotes(cards: OwnedCard[]): CkQuote[] {
 
 export async function loadCkBuylistQuotes(cards: OwnedCard[]): Promise<CkQuoteResult> {
   const config = resolveConfig()
+
+  if (!cards.length) {
+    return {
+      enabled: true,
+      provider: hasTauriRuntime() ? 'public' : config.endpoint ? 'api' : 'mock',
+      quotes: [],
+    }
+  }
+
+  if (hasTauriRuntime()) {
+    return {
+      enabled: true,
+      provider: 'public',
+      quotes: await fetchPublicCkQuotes(cards),
+      warning: 'Using direct CK public buylist feed.',
+    }
+  }
+
   if (!config.enabled) {
     return {
       enabled: false,
       provider: 'disabled',
       quotes: [],
-      warning: 'CK integration disabled. Set VITE_ENABLE_CK=1 or localStorage flag to enable.',
-    }
-  }
-
-  if (!cards.length) {
-    return {
-      enabled: true,
-      provider: config.endpoint ? 'api' : 'mock',
-      quotes: [],
+      warning: 'CK integration disabled. Set VITE_ENABLE_CK=1 or localStorage flag to enable in browser mode.',
     }
   }
 
@@ -134,7 +162,7 @@ export async function loadCkBuylistQuotes(cards: OwnedCard[]): Promise<CkQuoteRe
       enabled: true,
       provider: 'mock',
       quotes: buildMockQuotes(cards),
-      warning: 'Using mock CK pricing model. Configure VITE_CK_PROXY_URL for live API-backed quotes.',
+      warning: 'Using mock CK pricing model in browser mode. Configure VITE_CK_PROXY_URL for API-backed quotes.',
     }
   }
 

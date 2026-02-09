@@ -16,6 +16,10 @@ This folder contains the Group B sync pipeline and local API service.
   - `GET /sync/patch?from=<version>&to=<version>[&expand=1]`
   - `GET /sync/snapshot?version=<version>[&includeRecords=1]`
   - in-memory per-IP rate limiting
+- `cloudflare/`
+  - Worker + R2 deployment scaffold for hosted sync endpoints
+  - `wrangler.toml.example` and `src/worker.ts`
+  - compatible endpoint contract for desktop sync client
 
 ## Local smoke test (already validated)
 1. Copy two snapshot versions into `sync-service/data/versions/`.

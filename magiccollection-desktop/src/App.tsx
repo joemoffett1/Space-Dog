@@ -1,6 +1,7 @@
 ﻿import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { AppNav } from './components/AppNav'
+import { LocalAuthGate } from './components/LocalAuthGate'
 import { ProfileGate } from './components/ProfileGate'
 import { CollectionPage } from './pages/CollectionPage'
 import { ReportsPage } from './pages/ReportsPage'
@@ -36,6 +37,14 @@ import {
   listProtectedProfileIds,
   setProfilePasscode,
 } from './lib/profileAuth'
+import {
+  getLocalAuthStatus,
+  loginLocalAuthAccount,
+  logoutLocalAuthAccount,
+  markLocalAuthSynced,
+  registerLocalAuthAccount,
+  type LocalAuthStatus,
+} from './lib/localAuth'
 import type {
   AddCardInput,
   AppTab,
@@ -53,6 +62,9 @@ const SCRYFALL_COLLECTION_BATCH = 75
 
 function App() {
   const [profiles, setProfiles] = useState<Profile[]>([])
+  const [localAuthStatus, setLocalAuthStatus] = useState<LocalAuthStatus>(() =>
+    getLocalAuthStatus(),
+  )
   const [activeProfileId, setActiveProfileId] = useState<string | null>(() =>
     loadActiveProfileId(),
   )
@@ -71,6 +83,7 @@ function App() {
   const [syncProgressPct, setSyncProgressPct] = useState<number | null>(null)
   const [syncProgressText, setSyncProgressText] = useState<string>('')
   const [tabSwitchStartedAt, setTabSwitchStartedAt] = useState<number | null>(null)
+  const [isAuthBusy, setIsAuthBusy] = useState(false)
   const refreshAbortRef = useRef<AbortController | null>(null)
 
   const activeProfile = useMemo(
@@ -159,6 +172,7 @@ function App() {
 
     async function bootstrap() {
       try {
+        setLocalAuthStatus(getLocalAuthStatus())
         const fetchedProfiles = await listProfiles()
         if (cancelled) {
           return
@@ -329,6 +343,60 @@ function App() {
     setActiveProfileId(null)
     setOwnedCards({})
     setActiveTab('collection')
+  }
+
+  async function handleLocalAuthRegister(input: {
+    username: string
+    password: string
+    email?: string
+  }): Promise<boolean> {
+    setErrorMessage('')
+    setIsAuthBusy(true)
+    try {
+      await registerLocalAuthAccount(input)
+      setLocalAuthStatus(getLocalAuthStatus())
+      return true
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : 'Unable to create local account.',
+      )
+      return false
+    } finally {
+      setIsAuthBusy(false)
+    }
+  }
+
+  async function handleLocalAuthLogin(input: {
+    username: string
+    password: string
+  }): Promise<boolean> {
+    setErrorMessage('')
+    setIsAuthBusy(true)
+    try {
+      const ok = await loginLocalAuthAccount(input)
+      if (ok) {
+        setLocalAuthStatus(getLocalAuthStatus())
+      }
+      return ok
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : 'Unable to sign in locally.',
+      )
+      return false
+    } finally {
+      setIsAuthBusy(false)
+    }
+  }
+
+  function handleLocalAuthSignOut() {
+    logoutLocalAuthAccount()
+    setLocalAuthStatus(getLocalAuthStatus())
+    handleSignOut()
+  }
+
+  function handleMarkLocalAuthSynced() {
+    markLocalAuthSynced()
+    setLocalAuthStatus(getLocalAuthStatus())
   }
 
   function handleSelectTab(nextTab: AppTab) {
@@ -751,6 +819,18 @@ function App() {
     )
   }
 
+  if (!localAuthStatus.signedIn) {
+    return (
+      <LocalAuthGate
+        status={localAuthStatus}
+        onRegister={handleLocalAuthRegister}
+        onLogin={handleLocalAuthLogin}
+        errorMessage={errorMessage}
+        isBusy={isAuthBusy}
+      />
+    )
+  }
+
   if (!activeProfile) {
     return (
       <ProfileGate
@@ -863,6 +943,9 @@ function App() {
           <button className="button subtle" onClick={handleSignOut}>
             Change Collection
           </button>
+          <button className="button subtle" onClick={handleLocalAuthSignOut}>
+            Sign Out Account
+          </button>
         </div>
       </header>
 
@@ -909,6 +992,8 @@ function App() {
           <SettingsPage
             activeProfile={activeProfile}
             onReturnToCollection={() => setActiveTab('collection')}
+            localAuthStatus={localAuthStatus}
+            onMarkLocalAuthSynced={handleMarkLocalAuthSynced}
           />
         )}
       </main>

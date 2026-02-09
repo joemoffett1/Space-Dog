@@ -1,19 +1,26 @@
 use chrono::Utc;
+use reqwest::blocking::Client;
+use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, CONNECTION, REFERER, USER_AGENT};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;
+use std::time::{Duration, SystemTime};
 use tauri::{Manager, State};
 use uuid::Uuid;
 
 const MIGRATION_SQL_0001: &str = include_str!("../migrations/0001_initial.sql");
 const MIGRATION_SQL_0002: &str = include_str!("../migrations/0002_catalog_sync.sql");
 const CATALOG_DATASET_DEFAULT: &str = "default_cards";
+const CK_PRICELIST_URL: &str = "https://api.cardkingdom.com/api/v2/pricelist";
+const CK_PRICELIST_CACHE_FILE: &str = "ck_pricelist_cache.json";
+const CK_PRICELIST_CACHE_MAX_AGE_SECONDS: u64 = 60 * 60 * 12;
 
 #[derive(Clone)]
 struct AppState {
   db_path: PathBuf,
+  app_data_dir: PathBuf,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -141,6 +148,41 @@ struct MarketSnapshotInput {
   collector_number: String,
   image_url: Option<String>,
   market_price: Option<f64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CkQuoteRequestItem {
+  scryfall_id: String,
+  name: String,
+  quantity: i64,
+  foil_quantity: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct CkQuoteDto {
+  scryfall_id: String,
+  name: String,
+  quantity: i64,
+  cash_price: f64,
+  credit_price: f64,
+  qty_cap: i64,
+  source_url: String,
+}
+
+#[derive(Deserialize)]
+struct CkPricelistItem {
+  scryfall_id: Option<String>,
+  is_foil: Option<String>,
+  price_buy: Option<String>,
+  qty_buying: Option<i64>,
+  url: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CkPricelistPayload {
+  data: Vec<CkPricelistItem>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -697,6 +739,94 @@ fn maybe_insert_market_snapshot(
     .map_err(|e| e.to_string())?;
 
   Ok(())
+}
+
+fn parse_ck_bool(value: Option<&str>) -> bool {
+  matches!(
+    value.unwrap_or_default().trim().to_lowercase().as_str(),
+    "true" | "1" | "yes" | "y"
+  )
+}
+
+fn parse_ck_price(value: Option<&str>) -> f64 {
+  let text = value.unwrap_or_default().trim().replace('$', "");
+  text.parse::<f64>().unwrap_or(0.0)
+}
+
+fn ck_cache_path(state: &AppState) -> PathBuf {
+  state.app_data_dir.join(CK_PRICELIST_CACHE_FILE)
+}
+
+fn is_ck_cache_fresh(path: &PathBuf) -> bool {
+  if !path.exists() {
+    return false;
+  }
+  let Ok(metadata) = fs::metadata(path) else {
+    return false;
+  };
+  let Ok(modified) = metadata.modified() else {
+    return false;
+  };
+  let Ok(age) = SystemTime::now().duration_since(modified) else {
+    return false;
+  };
+  age.as_secs() <= CK_PRICELIST_CACHE_MAX_AGE_SECONDS
+}
+
+fn fetch_ck_pricelist_body() -> Result<String, String> {
+  let client = Client::builder()
+    .timeout(Duration::from_secs(60))
+    .build()
+    .map_err(|e| e.to_string())?;
+
+  let response = client
+    .get(CK_PRICELIST_URL)
+    .header(
+      USER_AGENT,
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    )
+    .header(ACCEPT, "application/json,text/plain,*/*")
+    .header(ACCEPT_LANGUAGE, "en-US,en;q=0.9")
+    .header(CONNECTION, "close")
+    .header(REFERER, "https://www.cardkingdom.com/")
+    .send()
+    .map_err(|e| e.to_string())?;
+
+  if !response.status().is_success() {
+    return Err(format!(
+      "Card Kingdom buylist request failed with status {}",
+      response.status()
+    ));
+  }
+
+  response.text().map_err(|e| e.to_string())
+}
+
+fn load_ck_pricelist_items(state: &AppState) -> Result<Vec<CkPricelistItem>, String> {
+  let cache_path = ck_cache_path(state);
+  let body = if is_ck_cache_fresh(&cache_path) {
+    fs::read_to_string(&cache_path).map_err(|e| e.to_string())?
+  } else {
+    let downloaded = fetch_ck_pricelist_body()?;
+    fs::write(&cache_path, &downloaded).map_err(|e| e.to_string())?;
+    downloaded
+  };
+
+  if let Ok(parsed) = serde_json::from_str::<CkPricelistPayload>(&body) {
+    return Ok(parsed.data);
+  }
+  if let Ok(parsed) = serde_json::from_str::<Vec<CkPricelistItem>>(&body) {
+    return Ok(parsed);
+  }
+  Err("Unable to parse Card Kingdom buylist payload.".to_string())
+}
+
+fn make_ck_source_url(raw: Option<&str>) -> String {
+  let path = raw.unwrap_or_default().trim().trim_start_matches('/');
+  if path.is_empty() {
+    return "https://www.cardkingdom.com/".to_string();
+  }
+  format!("https://www.cardkingdom.com/{}", path)
 }
 
 fn load_collection_rows(connection: &Connection, profile_id: &str) -> Result<Vec<OwnedCardDto>, String> {
@@ -1601,6 +1731,93 @@ fn get_market_price_trends(
   Ok(trends)
 }
 
+#[tauri::command]
+fn get_ck_buylist_quotes(
+  state: State<'_, AppState>,
+  items: Vec<CkQuoteRequestItem>,
+) -> Result<Vec<CkQuoteDto>, String> {
+  if items.is_empty() {
+    return Ok(Vec::new());
+  }
+
+  let rows = load_ck_pricelist_items(&state)?;
+  let mut by_key: std::collections::HashMap<(String, bool), CkPricelistItem> =
+    std::collections::HashMap::new();
+
+  for row in rows {
+    let scryfall_id = row.scryfall_id.clone().unwrap_or_default().trim().to_string();
+    if scryfall_id.is_empty() {
+      continue;
+    }
+    let is_foil = parse_ck_bool(row.is_foil.as_deref());
+    by_key.insert((scryfall_id, is_foil), row);
+  }
+
+  let mut quotes = Vec::new();
+  for item in items {
+    let scryfall_id = item.scryfall_id.trim().to_string();
+    if scryfall_id.is_empty() {
+      continue;
+    }
+    let nonfoil_qty = item.quantity.max(0);
+    let foil_qty = item.foil_quantity.max(0);
+    let total_qty = nonfoil_qty + foil_qty;
+    if total_qty <= 0 {
+      continue;
+    }
+
+    let nonfoil = by_key.get(&(scryfall_id.clone(), false));
+    let foil = by_key
+      .get(&(scryfall_id.clone(), true))
+      .or(nonfoil);
+
+    let mut weighted_cash_total = 0.0_f64;
+    let mut weighted_qty = 0_i64;
+    let mut qty_cap = 0_i64;
+    let mut source_url = "https://www.cardkingdom.com/".to_string();
+
+    if let Some(row) = nonfoil {
+      let cash = parse_ck_price(row.price_buy.as_deref()).max(0.0);
+      if cash > 0.0 && nonfoil_qty > 0 {
+        weighted_cash_total += cash * nonfoil_qty as f64;
+        weighted_qty += nonfoil_qty;
+      }
+      qty_cap += row.qty_buying.unwrap_or(0).max(0);
+      source_url = make_ck_source_url(row.url.as_deref());
+    }
+
+    if let Some(row) = foil {
+      let cash = parse_ck_price(row.price_buy.as_deref()).max(0.0);
+      if cash > 0.0 && foil_qty > 0 {
+        weighted_cash_total += cash * foil_qty as f64;
+        weighted_qty += foil_qty;
+      }
+      qty_cap += row.qty_buying.unwrap_or(0).max(0);
+      if source_url == "https://www.cardkingdom.com/" {
+        source_url = make_ck_source_url(row.url.as_deref());
+      }
+    }
+
+    if weighted_qty <= 0 {
+      continue;
+    }
+
+    let cash_price = (weighted_cash_total / weighted_qty as f64 * 100.0).round() / 100.0;
+    let credit_price = (cash_price * 1.30 * 100.0).round() / 100.0;
+    quotes.push(CkQuoteDto {
+      scryfall_id,
+      name: item.name,
+      quantity: total_qty,
+      cash_price,
+      credit_price,
+      qty_cap: qty_cap.max(total_qty),
+      source_url,
+    });
+  }
+
+  Ok(quotes)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -1609,7 +1826,7 @@ pub fn run() {
       let db_path = app_data_dir.join("magiccollection.db");
       init_database(&db_path)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;
-      app.manage(AppState { db_path });
+      app.manage(AppState { db_path, app_data_dir });
 
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -1637,7 +1854,8 @@ pub fn run() {
       reset_catalog_sync_state_for_test,
       optimize_catalog_storage,
       record_market_snapshots,
-      get_market_price_trends
+      get_market_price_trends,
+      get_ck_buylist_quotes
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
