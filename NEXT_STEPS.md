@@ -270,10 +270,10 @@ or PWA first then native wrapper.
 2. Keep `PROJECT_NOTES.md` as product-direction source of truth.
 3. Use `NEXT_STEPS.md` as actionable implementation roadmap.
 
-## Remaining Big Task Backlog (35 Total)
-Use this as the execution queue. Each completed big task triggers a README remote-update refresh.
+## Remaining Big Task Backlog (35 Total, Grouped)
+Use this grouped execution queue to reduce commit noise. We will commit by feature group, not per individual task.
 
-### Sync and Desktop Reliability
+## Group A: Sync Reliability and Recovery (6 tasks, 1-2 commits)
 1. Add sync-run locking to prevent overlapping refresh jobs.
 2. Add sync timeout/cancel handling and explicit retry state.
 3. Add hash-verification policy against payload hash and enforce fallback behavior.
@@ -281,7 +281,7 @@ Use this as the execution queue. Each completed big task triggers a README remot
 5. Add catalog index maintenance and DB vacuum strategy for heavy sync days.
 6. Add recovery tests for interrupted sync and mismatch rollback.
 
-### Server Patch Pipeline
+## Group B: Server Patch Pipeline Core (8 tasks, 2-3 commits)
 7. Finalize hosting stack and scaffold sync service runtime.
 8. Implement daily Scryfall `default_cards` ingest job.
 9. Implement snapshot normalization and storage pipeline.
@@ -291,7 +291,7 @@ Use this as the execution queue. Each completed big task triggers a README remot
 13. Implement sync endpoints (`/sync/status`, `/sync/patch`, `/sync/snapshot`).
 14. Implement server observability, health checks, and rate-limit protections.
 
-### Search and Market Depth
+## Group C: Search and Discovery UX (6 tasks, 1-2 commits)
 15. Implement syntax-first Scryfall query parser UI.
 16. Add query helper UX (operator chips, examples, validation hints, saved queries).
 17. Add dynamic result loading with cancellation and virtualization.
@@ -299,7 +299,7 @@ Use this as the execution queue. Each completed big task triggers a README remot
 19. Add owned/highlighted vs unowned/dimmed state in market versions view.
 20. Add keyboard-first market actions (add/remove/tag from results).
 
-### Collection Parity and Editing
+## Group D: Collection Editing and Scale UX (6 tasks, 1-2 commits)
 21. Add per-copy metadata fields (condition, language, location, notes, acquisition cost/date).
 22. Add bulk-select and bulk-edit operations.
 23. Improve image mode control parity and reliability for +/-, foil toggle, and tag apply.
@@ -307,15 +307,20 @@ Use this as the execution queue. Each completed big task triggers a README remot
 25. Add robust card edit modal/inline edit workflow with validation.
 26. Add action history/undo strategy for high-speed edits.
 
-### CK and Sell Workflow
+## Group E: CK Buylist and Sell Flow (4 tasks, 1 commit)
 27. Implement CK adapter for market and buylist ingestion.
 28. Add buylist report metrics (cash/credit payout, qty caps, coverage).
 29. Implement sell intent flow (selection -> payload preview -> outbound handoff).
 30. Add provider configuration and feature flags for CK integration.
 
-### Cross-Platform and Sync Expansion
+## Group F: Cross-Platform Core and Handoff (5 tasks, 1-2 commits)
 31. Extract shared domain/sync package for desktop/web/mobile.
 32. Build web-client sync bootstrap using same patch protocol.
 33. Define mobile local-store and background sync architecture.
 34. Implement auth direction selected for alpha/beta path.
 35. Implement drag/drop handoff flow (desktop URL/text first, web native drag/drop next).
+
+## Planned Commit Cadence
+1. Commit per feature group completion, not per task.
+2. Expected total commits for this backlog: 7-12.
+3. README remote-update refresh occurs after each group completion.

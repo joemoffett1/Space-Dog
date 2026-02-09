@@ -24,6 +24,11 @@ Versioning policy for alpha:
 - full changelog mirror
 - Added explicit remaining big-task backlog to `NEXT_STEPS.md` with a fixed count for execution gating.
 
+## [1.8.4-alpha] - 2026-02-09
+### Changed
+- Consolidated the 35 remaining tasks into 6 feature groups in `NEXT_STEPS.md`.
+- Added grouped commit cadence to reduce commit volume (target: 7-12 commits for the backlog).
+
 ## [1.8.1-alpha] - 2026-02-09
 ### Changed
 - Refresh hover text now includes both relative time remaining and exact local unlock timestamp.
