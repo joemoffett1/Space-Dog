@@ -21,6 +21,8 @@ interface LocalAuthGateProps {
   isBusy?: boolean
 }
 
+type AuthMode = 'login' | 'create'
+
 export function LocalAuthGate({
   status,
   onRegister,
@@ -28,6 +30,7 @@ export function LocalAuthGate({
   errorMessage = '',
   isBusy = false,
 }: LocalAuthGateProps) {
+  const [mode, setMode] = useState<AuthMode>('login')
   const [username, setUsername] = useState(status.username ?? '')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -40,6 +43,13 @@ export function LocalAuthGate({
     if (localError) {
       setLocalError('')
     }
+  }
+
+  function switchMode(nextMode: AuthMode) {
+    setMode(nextMode)
+    setLocalError('')
+    setPassword('')
+    setConfirmPassword('')
   }
 
   async function handleRegister(event: FormEvent<HTMLFormElement>) {
@@ -97,13 +107,32 @@ export function LocalAuthGate({
     <main className="gate-wrap">
       <section className="gate-card">
         <p className="app-kicker">MagicCollection Desktop</p>
-        <h1>{hasAccount ? 'Local Sign In' : 'Create Local Account'}</h1>
+        <h1>{mode === 'login' ? 'Local Sign In' : 'Create Local Account'}</h1>
         <p className="muted">
           Offline-first account on this device. Cloud sync can be linked later without
           changing collection data.
         </p>
 
-        {!hasAccount ? (
+        <div className="gate-mode-switch">
+          <button
+            type="button"
+            className={`mode-pill ${mode === 'login' ? 'active' : ''}`}
+            onClick={() => switchMode('login')}
+            disabled={isBusy}
+          >
+            Login
+          </button>
+          <button
+            type="button"
+            className={`mode-pill ${mode === 'create' ? 'active' : ''}`}
+            onClick={() => switchMode('create')}
+            disabled={isBusy}
+          >
+            Create Account
+          </button>
+        </div>
+
+        {mode === 'create' ? (
           <form className="create-wizard" onSubmit={handleRegister}>
             <label>
               <span className="step-label">Username</span>
@@ -161,8 +190,17 @@ export function LocalAuthGate({
                 />
               </label>
             </div>
-            <button className="button" type="submit" disabled={isBusy}>
-              {isBusy ? 'Creating...' : 'Create Local Account'}
+            {hasAccount ? (
+              <p className="muted small">
+                This device already has a local account. Sign in with the Login tab.
+              </p>
+            ) : null}
+            <button className="button" type="submit" disabled={isBusy || hasAccount}>
+              {isBusy
+                ? 'Creating...'
+                : hasAccount
+                ? 'Account Already Exists'
+                : 'Create Local Account'}
             </button>
           </form>
         ) : (
@@ -194,7 +232,12 @@ export function LocalAuthGate({
                 disabled={isBusy}
               />
             </label>
-            <button className="button" type="submit" disabled={isBusy}>
+            {!hasAccount ? (
+              <p className="muted small">
+                No local account found on this device yet. Open Create Account to start.
+              </p>
+            ) : null}
+            <button className="button" type="submit" disabled={isBusy || !hasAccount}>
               {isBusy ? 'Signing In...' : 'Sign In'}
             </button>
           </form>

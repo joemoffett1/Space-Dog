@@ -8,6 +8,11 @@ Versioning policy for alpha:
 - Increment `patch` (`x` in `1.0.x-alpha`) for updates/fixes to existing features.
 - Use engineering discretion on feature vs update.
 
+## [1.16.1-alpha] - 2026-02-09
+### Changed
+- Local auth entry flow is now login-first with explicit `Login` / `Create Account` mode switch.
+- Account creation is now behind the create tab instead of being the default initial screen.
+
 ## [1.16.0-alpha] - 2026-02-09
 ### Added
 - Added collection action-history undo flow (Group D task 26):

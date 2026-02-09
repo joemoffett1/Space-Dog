@@ -17,6 +17,7 @@ Current stage: `1.x.x-alpha`
 - Updated Reports CK provider flow to include `public` provider mode.
 - Updated collection mutation handlers to record undo history for quantity/remove/tag/metadata edits.
 - Updated sync-service docs to include Cloudflare hosting path alongside local Python server.
+- Updated auth gate UX to default to Login first, with Create Account behind an explicit tab switch.
 
 ## Blockers (Logged And Bypassed)
 - Group B blocker: production Cloudflare account/bucket/deploy credentials are not configured yet.
@@ -44,7 +45,8 @@ Current stage: `1.x.x-alpha`
 5. Group E: `completed`
 6. Group F: `in_progress` (cloud auth + mobile store pending)
 
-## Full Changelog# CHANGELOG
+## Full Changelog
+# CHANGELOG
 
 All notable changes to this project are documented in this file.
 
@@ -53,6 +55,11 @@ Versioning policy for alpha:
 - Increment `minor` (`x` in `1.x.0-alpha`) for new features.
 - Increment `patch` (`x` in `1.0.x-alpha`) for updates/fixes to existing features.
 - Use engineering discretion on feature vs update.
+
+## [1.16.1-alpha] - 2026-02-09
+### Changed
+- Local auth entry flow is now login-first with explicit `Login` / `Create Account` mode switch.
+- Account creation is now behind the create tab instead of being the default initial screen.
 
 ## [1.16.0-alpha] - 2026-02-09
 ### Added
