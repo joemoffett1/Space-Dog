@@ -8,6 +8,13 @@ Versioning policy for alpha:
 - Increment `patch` (`x` in `1.0.x-alpha`) for updates/fixes to existing features.
 - Use engineering discretion on feature vs update.
 
+## [1.8.2-alpha] - 2026-02-09
+### Added
+- Initialized Git version control for the project and published `main` to `joemoffett1/Space-Dog`.
+
+### Changed
+- Added root `.gitignore` rules to exclude large local datasets/caches/backups from repository history.
+
 ## [1.8.1-alpha] - 2026-02-09
 ### Changed
 - Refresh hover text now includes both relative time remaining and exact local unlock timestamp.
