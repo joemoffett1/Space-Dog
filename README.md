@@ -1,4 +1,46 @@
-﻿# CHANGELOG
+# MagicCollection Remote Update Board
+
+This README is currently the primary remote update surface for project progress.
+It includes a quick summary, test focus, and a full changelog mirror.
+
+Last updated: 2026-02-09
+Current stage: `1.x.x-alpha`
+
+## Features Added (Since Recent Input)
+- DB-backed catalog sync foundation in Tauri:
+  - Catalog tables for card records, sync state, and patch history.
+  - Transactional patch/snapshot apply commands with rollback safety.
+  - Deterministic state hash tracking for sync integrity.
+- Batched catalog price lookup during collection refresh:
+  - Replaced per-card local lookup path with one batched retrieval path.
+- Git + GitHub project bootstrap:
+  - Repository initialized and published to `joemoffett1/Space-Dog`.
+  - Root `.gitignore` added to keep large local datasets/caches out of git history.
+
+## Features Updated (Since Recent Input)
+- Catalog sync runtime path updated:
+  - Tauri runtime now uses backend DB sync state/patch flow.
+  - Browser/dev fallback path remains available.
+- Refresh hover UX updated:
+  - Tooltip now shows both remaining time and exact local unlock timestamp.
+
+## Things You Need To Test
+- Sync state behavior:
+  - Confirm `Synced` / `Not Synced` / `Syncing...` transitions remain correct after app restart and machine reboot.
+- Refresh behavior:
+  - Trigger refresh and verify progress completes, then sync state flips correctly.
+- Version transition behavior:
+  - Confirm old build -> latest build transition updates state without getting stuck.
+- Price refresh behavior:
+  - Verify cards in collection receive price updates and trend data after refresh.
+- Error handling:
+  - Test with network disabled during refresh and confirm recovery path on next refresh.
+- Profile flow:
+  - Confirm create/open/switch profile still behaves correctly after sync backend changes.
+
+## Full Changelog
+
+# CHANGELOG
 
 All notable changes to this project are documented in this file.
 
@@ -14,15 +56,6 @@ Versioning policy for alpha:
 
 ### Changed
 - Added root `.gitignore` rules to exclude large local datasets/caches/backups from repository history.
-
-## [1.8.3-alpha] - 2026-02-09
-### Added
-- Added root `README.md` as the remote update board with:
-- short feature-added summary
-- short feature-updated summary
-- explicit user test checklist
-- full changelog mirror
-- Added explicit remaining big-task backlog to `NEXT_STEPS.md` with a fixed count for execution gating.
 
 ## [1.8.1-alpha] - 2026-02-09
 ### Changed

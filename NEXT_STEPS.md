@@ -269,3 +269,53 @@ or PWA first then native wrapper.
 1. Keep `CHANGELOG.md` updated every work session.
 2. Keep `PROJECT_NOTES.md` as product-direction source of truth.
 3. Use `NEXT_STEPS.md` as actionable implementation roadmap.
+
+## Remaining Big Task Backlog (35 Total)
+Use this as the execution queue. Each completed big task triggers a README remote-update refresh.
+
+### Sync and Desktop Reliability
+1. Add sync-run locking to prevent overlapping refresh jobs.
+2. Add sync timeout/cancel handling and explicit retry state.
+3. Add hash-verification policy against payload hash and enforce fallback behavior.
+4. Add a sync diagnostics/debug panel for last run details.
+5. Add catalog index maintenance and DB vacuum strategy for heavy sync days.
+6. Add recovery tests for interrupted sync and mismatch rollback.
+
+### Server Patch Pipeline
+7. Finalize hosting stack and scaffold sync service runtime.
+8. Implement daily Scryfall `default_cards` ingest job.
+9. Implement snapshot normalization and storage pipeline.
+10. Implement daily incremental patch generation.
+11. Implement compacted patch generation and 21-day retention cleanup.
+12. Implement manifest generation with version/hash metadata.
+13. Implement sync endpoints (`/sync/status`, `/sync/patch`, `/sync/snapshot`).
+14. Implement server observability, health checks, and rate-limit protections.
+
+### Search and Market Depth
+15. Implement syntax-first Scryfall query parser UI.
+16. Add query helper UX (operator chips, examples, validation hints, saved queries).
+17. Add dynamic result loading with cancellation and virtualization.
+18. Add market detail drawer with full printings/version context.
+19. Add owned/highlighted vs unowned/dimmed state in market versions view.
+20. Add keyboard-first market actions (add/remove/tag from results).
+
+### Collection Parity and Editing
+21. Add per-copy metadata fields (condition, language, location, notes, acquisition cost/date).
+22. Add bulk-select and bulk-edit operations.
+23. Improve image mode control parity and reliability for +/-, foil toggle, and tag apply.
+24. Add high-card-count performance instrumentation and profiling output.
+25. Add robust card edit modal/inline edit workflow with validation.
+26. Add action history/undo strategy for high-speed edits.
+
+### CK and Sell Workflow
+27. Implement CK adapter for market and buylist ingestion.
+28. Add buylist report metrics (cash/credit payout, qty caps, coverage).
+29. Implement sell intent flow (selection -> payload preview -> outbound handoff).
+30. Add provider configuration and feature flags for CK integration.
+
+### Cross-Platform and Sync Expansion
+31. Extract shared domain/sync package for desktop/web/mobile.
+32. Build web-client sync bootstrap using same patch protocol.
+33. Define mobile local-store and background sync architecture.
+34. Implement auth direction selected for alpha/beta path.
+35. Implement drag/drop handoff flow (desktop URL/text first, web native drag/drop next).
