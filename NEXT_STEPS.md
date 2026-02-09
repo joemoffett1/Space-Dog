@@ -277,7 +277,7 @@ Use this grouped execution queue to reduce commit noise. We will commit by featu
 1. Group A: Sync Reliability and Recovery - `completed`
 2. Group B: Server Patch Pipeline Core - `in_progress`
 3. Group C: Search and Discovery UX - `completed`
-4. Group D: Collection Editing and Scale UX - `in_progress`
+4. Group D: Collection Editing and Scale UX - `completed`
 5. Group E: CK Buylist and Sell Flow - `completed`
 6. Group F: Cross-Platform Core and Handoff - `in_progress`
 
@@ -290,10 +290,9 @@ Use this grouped execution queue to reduce commit noise. We will commit by featu
 - blocker: production Cloudflare account/bucket/deployment credentials are not configured yet.
 3. Group C completed:
 - saved queries, helper chips, query validation hints, keyboard actions, and drag/drop Scryfall URL handoff are implemented in Market.
-4. Group D in progress:
-- per-card metadata edit modal and bulk metadata operations are implemented.
-- perf metrics logging/inspection is implemented.
-- blocker: full undo/action-history stack is not implemented yet.
+4. Group D completed:
+- image-mode quantity controls, foil toggle, and tag-apply workflow are implemented.
+- collection action-history undo is implemented with per-card state restore.
 5. Group E completed:
 - CK buylist integration now supports direct public Card Kingdom feed via Tauri backend command with local cache.
 - buylist metrics and sell-intent handoff are implemented in Reports with provider mode fallback (`public`, `api`, `mock`).

@@ -121,6 +121,33 @@ struct UpdateOwnedCardMetadataInput {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct SetOwnedCardStateCardInput {
+  scryfall_id: String,
+  name: String,
+  set_code: String,
+  collector_number: String,
+  image_url: Option<String>,
+  quantity: i64,
+  foil_quantity: i64,
+  condition_code: Option<String>,
+  language: Option<String>,
+  location_name: Option<String>,
+  notes: Option<String>,
+  purchase_price: Option<f64>,
+  date_added: Option<String>,
+  #[serde(default)]
+  tags: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetOwnedCardStateInput {
+  profile_id: String,
+  card: SetOwnedCardStateCardInput,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ImportCollectionRowInput {
   scryfall_id: String,
   name: String,
@@ -1424,6 +1451,169 @@ fn update_owned_card_metadata(
 }
 
 #[tauri::command]
+fn set_owned_card_state(
+  state: State<'_, AppState>,
+  input: SetOwnedCardStateInput,
+) -> Result<Vec<OwnedCardDto>, String> {
+  let connection = open_database(&state.db_path)?;
+  ensure_profile_exists(&connection, &input.profile_id)?;
+
+  let quantity = input.card.quantity.max(0);
+  let foil_quantity = input.card.foil_quantity.max(0);
+  if quantity + foil_quantity <= 0 {
+    connection
+      .execute(
+        "DELETE FROM owned_items WHERE profile_id = ?1 AND printing_id = ?2",
+        params![&input.profile_id, &input.card.scryfall_id],
+      )
+      .map_err(|e| e.to_string())?;
+    return load_collection_rows(&connection, &input.profile_id);
+  }
+
+  ensure_card_and_printing(
+    &connection,
+    &input.card.scryfall_id,
+    &input.card.name,
+    &input.card.set_code,
+    &input.card.collector_number,
+    input.card.image_url.as_deref(),
+  )?;
+
+  let existing_owned_item_id: Option<String> = connection
+    .query_row(
+      "SELECT id
+       FROM owned_items
+       WHERE profile_id = ?1
+         AND printing_id = ?2
+       ORDER BY updated_at DESC
+       LIMIT 1",
+      params![&input.profile_id, &input.card.scryfall_id],
+      |row| row.get(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())?;
+
+  let mut location_id: Option<String> = None;
+  if let Some(location_name) = input.card.location_name.as_deref() {
+    let trimmed = location_name.trim();
+    if !trimmed.is_empty() {
+      let existing_location: Option<String> = connection
+        .query_row(
+          "SELECT id FROM locations WHERE profile_id = ?1 AND lower(name) = lower(?2) LIMIT 1",
+          params![&input.profile_id, trimmed],
+          |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+      location_id = if let Some(id) = existing_location {
+        Some(id)
+      } else {
+        let id = Uuid::new_v4().to_string();
+        let now = now_iso();
+        connection
+          .execute(
+            "INSERT INTO locations (id, profile_id, name, type, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'box', ?4, ?4)",
+            params![&id, &input.profile_id, trimmed, now],
+          )
+          .map_err(|e| e.to_string())?;
+        Some(id)
+      };
+    }
+  }
+
+  let next_condition = input
+    .card
+    .condition_code
+    .as_deref()
+    .map(|value| value.trim().to_uppercase())
+    .filter(|value| !value.is_empty())
+    .unwrap_or_else(|| "NM".to_string());
+  let next_language = input
+    .card
+    .language
+    .as_deref()
+    .map(|value| value.trim().to_lowercase())
+    .filter(|value| !value.is_empty())
+    .unwrap_or_else(|| "en".to_string());
+  let notes = input
+    .card
+    .notes
+    .as_deref()
+    .map(|value| value.trim().to_string())
+    .filter(|value| !value.is_empty());
+  let date_added = input
+    .card
+    .date_added
+    .as_deref()
+    .map(|value| value.trim().to_string())
+    .filter(|value| !value.is_empty());
+  let now = now_iso();
+
+  let owned_item_id = if let Some(owned_item_id) = existing_owned_item_id {
+    connection
+      .execute(
+        "UPDATE owned_items
+         SET quantity = ?1,
+             foil_quantity = ?2,
+             condition_code = ?3,
+             language = ?4,
+             location_id = ?5,
+             notes = ?6,
+             purchase_price = ?7,
+             date_added = ?8,
+             updated_at = ?9
+         WHERE id = ?10",
+        params![
+          quantity,
+          foil_quantity,
+          next_condition,
+          next_language,
+          location_id,
+          notes,
+          input.card.purchase_price,
+          date_added,
+          now,
+          owned_item_id
+        ],
+      )
+      .map_err(|e| e.to_string())?;
+    owned_item_id
+  } else {
+    let owned_item_id = Uuid::new_v4().to_string();
+    connection
+      .execute(
+        "INSERT INTO owned_items (
+           id, profile_id, printing_id, quantity, foil_quantity, condition_code, language,
+           purchase_price, date_added, location_id, notes, created_at, updated_at
+         )
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
+        params![
+          &owned_item_id,
+          &input.profile_id,
+          &input.card.scryfall_id,
+          quantity,
+          foil_quantity,
+          next_condition,
+          next_language,
+          input.card.purchase_price,
+          date_added,
+          location_id,
+          notes,
+          now
+        ],
+      )
+      .map_err(|e| e.to_string())?;
+    owned_item_id
+  };
+
+  let normalized_tags = derive_tags(quantity, foil_quantity, input.card.tags.clone());
+  upsert_tags_for_owned_item(&connection, &input.profile_id, &owned_item_id, &normalized_tags)?;
+
+  load_collection_rows(&connection, &input.profile_id)
+}
+
+#[tauri::command]
 fn get_catalog_sync_state(
   state: State<'_, AppState>,
   dataset: Option<String>,
@@ -1847,6 +2037,7 @@ pub fn run() {
       import_collection_rows,
       bulk_update_tags,
       update_owned_card_metadata,
+      set_owned_card_state,
       get_catalog_sync_state,
       get_catalog_price_records,
       apply_catalog_snapshot,

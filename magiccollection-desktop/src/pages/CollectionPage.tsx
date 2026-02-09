@@ -20,6 +20,9 @@ interface CollectionPageProps {
     metadata: Omit<UpdateOwnedCardMetadataInput, 'profileId' | 'scryfallId'>,
   ) => Promise<void>
   onOpenMarket: () => void
+  onUndoLastAction: () => Promise<void>
+  canUndo: boolean
+  undoLabel?: string
   onImportArchidektCsv: (file: File) => Promise<{
     rowsImported: number
     copiesImported: number
@@ -158,6 +161,9 @@ export function CollectionPage({
   onUpdateMetadata,
   onBulkUpdateMetadata,
   onOpenMarket,
+  onUndoLastAction,
+  canUndo,
+  undoLabel = '',
   onImportArchidektCsv,
   isSyncing = false,
 }: CollectionPageProps) {
@@ -472,6 +478,15 @@ export function CollectionPage({
         <div className="collection-actions">
           <button className="button" onClick={onOpenMarket} type="button">
             Open Market
+          </button>
+          <button
+            className="button subtle"
+            onClick={() => void onUndoLastAction()}
+            type="button"
+            disabled={!canUndo || isSyncing}
+            title={undoLabel || 'Undo last action'}
+          >
+            Undo
           </button>
           <button className="button subtle" onClick={handleChooseCsvFile} type="button" disabled={isSyncing}>
             Import Archidekt CSV

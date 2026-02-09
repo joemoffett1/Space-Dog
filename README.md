@@ -11,15 +11,15 @@ Current stage: `1.x.x-alpha`
 - Added local account sync-state visibility in Settings (`Pending` / `Synced` + last synced timestamp).
 - Added direct Card Kingdom public buylist integration in Tauri backend (`get_ck_buylist_quotes`) with 12-hour local cache.
 - Added Cloudflare Worker + R2 deployment scaffold for sync service under `sync-service/cloudflare`.
+- Added collection action-history undo flow with per-card restore snapshots and backend state-restore command.
 
 ## Features Updated (This Run)
 - Updated Reports CK provider flow to include `public` provider mode.
+- Updated collection mutation handlers to record undo history for quantity/remove/tag/metadata edits.
 - Updated sync-service docs to include Cloudflare hosting path alongside local Python server.
-- Updated local input styling in auth/profile forms for consistency with the space-themed UI.
 
 ## Blockers (Logged And Bypassed)
 - Group B blocker: production Cloudflare account/bucket/deploy credentials are not configured yet.
-- Group D blocker: full undo/action-history stack is still pending.
 - Group F blocker: cloud account server and mobile-store design are still pending.
 
 ## Things You Need To Test
@@ -27,19 +27,21 @@ Current stage: `1.x.x-alpha`
   - create local account on first launch
   - sign out account from header
   - sign back in and confirm collection profiles still load
+- Undo flow:
+  - perform quantity edits/remove/tag/metadata edits
+  - click `Undo` in Collection
+  - confirm the previous card state restores correctly
 - CK public buylist flow:
   - open Reports
   - click `Refresh CK Quotes`
   - confirm provider shows `public` and payout totals populate
-- Sync status behavior:
-  - verify `Synced` / `Not Synced` pill still updates correctly and refresh/cancel still works
 
 ## Group Status
 1. Group A: `completed`
 2. Group B: `in_progress` (cloud deployment credentials pending)
 3. Group C: `completed`
-4. Group D: `in_progress` (undo/action history pending)
-5. Group E: `completed` (public CK integration active)
+4. Group D: `completed`
+5. Group E: `completed`
 6. Group F: `in_progress` (cloud auth + mobile store pending)
 
 ## Full Changelog# CHANGELOG
@@ -51,6 +53,18 @@ Versioning policy for alpha:
 - Increment `minor` (`x` in `1.x.0-alpha`) for new features.
 - Increment `patch` (`x` in `1.0.x-alpha`) for updates/fixes to existing features.
 - Use engineering discretion on feature vs update.
+
+## [1.16.0-alpha] - 2026-02-09
+### Added
+- Added collection action-history undo flow (Group D task 26):
+- new `Undo` action in Collection toolbar
+- per-action reversible snapshots for quantity edits, remove, tag updates, and metadata edits
+- Added backend card-state restore API for deterministic undo:
+- frontend API: `setOwnedCardState` in `src/lib/backend.ts`
+- Tauri command: `set_owned_card_state` in `src-tauri/src/lib.rs`
+
+### Changed
+- Collection mutation handlers now record undo entries and restore previous card state safely.
 
 ## [1.15.0-alpha] - 2026-02-09
 ### Added

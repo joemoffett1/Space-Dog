@@ -16,6 +16,7 @@ import {
   listProfiles,
   recordMarketSnapshots,
   removeCardFromCollection,
+  setOwnedCardState,
   updateOwnedCardMetadata,
   updateCardQuantity,
 } from './lib/backend'
@@ -49,6 +50,7 @@ import type {
   AddCardInput,
   AppTab,
   CreateProfileRequest,
+  OwnedCard,
   UpdateOwnedCardMetadataInput,
   OwnedCardMap,
   Profile,
@@ -57,6 +59,17 @@ import type {
 const MarketPage = lazy(() => import('./pages/MarketPage'))
 
 type MarketAddInput = Omit<AddCardInput, 'profileId'>
+type CardUndoEntry = {
+  cardId: string
+  before: OwnedCard | null
+}
+type UndoEntry = {
+  id: string
+  label: string
+  createdAt: string
+  cards: CardUndoEntry[]
+}
+const MAX_UNDO_ENTRIES = 30
 
 const SCRYFALL_COLLECTION_BATCH = 75
 
@@ -84,6 +97,7 @@ function App() {
   const [syncProgressText, setSyncProgressText] = useState<string>('')
   const [tabSwitchStartedAt, setTabSwitchStartedAt] = useState<number | null>(null)
   const [isAuthBusy, setIsAuthBusy] = useState(false)
+  const [undoStack, setUndoStack] = useState<UndoEntry[]>([])
   const refreshAbortRef = useRef<AbortController | null>(null)
 
   const activeProfile = useMemo(
@@ -154,6 +168,27 @@ function App() {
       delete copy[cardId]
       return copy
     })
+  }
+
+  function captureUndoCards(cardIds: string[]): CardUndoEntry[] {
+    const uniqueIds = [...new Set(cardIds)]
+    return uniqueIds.map((cardId) => ({
+      cardId,
+      before: ownedCards[cardId] ? { ...ownedCards[cardId], tags: [...ownedCards[cardId].tags] } : null,
+    }))
+  }
+
+  function pushUndoEntry(label: string, cards: CardUndoEntry[]) {
+    if (!cards.length) {
+      return
+    }
+    const entry: UndoEntry = {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      label,
+      createdAt: new Date().toISOString(),
+      cards,
+    }
+    setUndoStack((previous) => [entry, ...previous].slice(0, MAX_UNDO_ENTRIES))
   }
 
   async function restoreCollectionFromBackend(profileId: string) {
@@ -306,6 +341,7 @@ function App() {
       refreshProtectedProfiles(fetchedProfiles)
       setActiveProfileId(profile.id)
       setOwnedCards(asCardMap(cards))
+      setUndoStack([])
       setActiveTab('collection')
       return true
     } catch (error) {
@@ -327,6 +363,7 @@ function App() {
       const cards = await getCollection(profileId)
       setActiveProfileId(profileId)
       setOwnedCards(asCardMap(cards))
+      setUndoStack([])
       setActiveTab('collection')
       return true
     } catch (error) {
@@ -342,6 +379,7 @@ function App() {
   function handleSignOut() {
     setActiveProfileId(null)
     setOwnedCards({})
+    setUndoStack([])
     setActiveTab('collection')
   }
 
@@ -409,6 +447,7 @@ function App() {
       return
     }
 
+    const undoCards = captureUndoCards([input.scryfallId])
     setErrorMessage('')
     setSyncProgressPct(null)
     setSyncProgressText('')
@@ -419,6 +458,7 @@ function App() {
         profileId: activeProfile.id,
       })
       setOwnedCards(asCardMap(cards))
+      pushUndoEntry(`Add ${input.name}`, undoCards)
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : 'Unable to add card to collection.',
@@ -433,6 +473,7 @@ function App() {
       return
     }
 
+    const undoCards = captureUndoCards([cardId])
     setErrorMessage('')
     setSyncProgressPct(null)
     setSyncProgressText('')
@@ -446,6 +487,7 @@ function App() {
         delta: 1,
       })
       setOwnedCards(asCardMap(cards))
+      pushUndoEntry(foil ? 'Add foil copy' : 'Add nonfoil copy', undoCards)
     } catch (error) {
       await restoreCollectionFromBackend(activeProfile.id)
       setErrorMessage(
@@ -461,6 +503,7 @@ function App() {
       return
     }
 
+    const undoCards = captureUndoCards([cardId])
     setErrorMessage('')
     setSyncProgressPct(null)
     setSyncProgressText('')
@@ -474,6 +517,7 @@ function App() {
         delta: -1,
       })
       setOwnedCards(asCardMap(cards))
+      pushUndoEntry(foil ? 'Remove foil copy' : 'Remove nonfoil copy', undoCards)
     } catch (error) {
       await restoreCollectionFromBackend(activeProfile.id)
       setErrorMessage(
@@ -489,6 +533,7 @@ function App() {
       return
     }
 
+    const undoCards = captureUndoCards([cardId])
     setErrorMessage('')
     setSyncProgressPct(null)
     setSyncProgressText('')
@@ -500,6 +545,7 @@ function App() {
         scryfallId: cardId,
       })
       setOwnedCards(asCardMap(cards))
+      pushUndoEntry('Remove card', undoCards)
     } catch (error) {
       await restoreCollectionFromBackend(activeProfile.id)
       setErrorMessage(
@@ -515,6 +561,7 @@ function App() {
       return
     }
 
+    const undoCards = captureUndoCards([cardId])
     setErrorMessage('')
     setSyncProgressPct(null)
     setSyncProgressText('')
@@ -527,6 +574,7 @@ function App() {
         includeAutoRules: false,
       })
       setOwnedCards(asCardMap(cards))
+      pushUndoEntry(`Tag card (${tag})`, undoCards)
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : 'Unable to tag card.',
@@ -544,6 +592,7 @@ function App() {
       return
     }
 
+    const undoCards = captureUndoCards([cardId])
     setErrorMessage('')
     setSyncProgressPct(null)
     setSyncProgressText('')
@@ -555,6 +604,7 @@ function App() {
         ...metadata,
       })
       setOwnedCards(asCardMap(cards))
+      pushUndoEntry('Edit card metadata', undoCards)
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : 'Unable to update card metadata.',
@@ -572,6 +622,7 @@ function App() {
       return
     }
 
+    const undoCards = captureUndoCards(cardIds)
     setErrorMessage('')
     setSyncProgressPct(null)
     setSyncProgressText('')
@@ -586,11 +637,47 @@ function App() {
         })
       }
       setOwnedCards(asCardMap(latestCards))
+      pushUndoEntry(`Bulk metadata update (${cardIds.length})`, undoCards)
     } catch (error) {
       await restoreCollectionFromBackend(activeProfile.id)
       setErrorMessage(
         error instanceof Error ? error.message : 'Unable to bulk update metadata.',
       )
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
+  async function handleUndoLastAction(): Promise<void> {
+    if (!activeProfile || !undoStack.length) {
+      return
+    }
+
+    const [entry, ...remaining] = undoStack
+    setErrorMessage('')
+    setSyncProgressPct(null)
+    setSyncProgressText('')
+    setIsSyncing(true)
+    try {
+      let latestCards = await getCollection(activeProfile.id)
+      for (const row of entry.cards) {
+        if (!row.before) {
+          latestCards = await removeCardFromCollection({
+            profileId: activeProfile.id,
+            scryfallId: row.cardId,
+          })
+          continue
+        }
+        latestCards = await setOwnedCardState({
+          profileId: activeProfile.id,
+          card: row.before,
+        })
+      }
+      setOwnedCards(asCardMap(latestCards))
+      setUndoStack(remaining)
+    } catch (error) {
+      await restoreCollectionFromBackend(activeProfile.id)
+      setErrorMessage(error instanceof Error ? error.message : 'Unable to undo last action.')
     } finally {
       setIsSyncing(false)
     }
@@ -887,6 +974,7 @@ function App() {
     : refreshReason.includes('window')
       ? `Next refresh in ${formatRemaining(refreshLockedUntil)} (local ${formatLocalUnlock(refreshLockedUntil)}).`
       : refreshReason
+  const latestUndo = undoStack[0] ?? null
 
   return (
     <div className="app-shell">
@@ -966,6 +1054,9 @@ function App() {
             onBulkUpdateMetadata={handleBulkUpdateCardMetadata}
             onOpenMarket={() => setActiveTab('market')}
             onImportArchidektCsv={handleImportArchidektCsv}
+            onUndoLastAction={handleUndoLastAction}
+            canUndo={undoStack.length > 0}
+            undoLabel={latestUndo ? `${latestUndo.label} (${new Date(latestUndo.createdAt).toLocaleTimeString()})` : ''}
             isSyncing={isSyncing}
           />
         )}

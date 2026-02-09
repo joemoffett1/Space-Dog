@@ -8,6 +8,18 @@ Versioning policy for alpha:
 - Increment `patch` (`x` in `1.0.x-alpha`) for updates/fixes to existing features.
 - Use engineering discretion on feature vs update.
 
+## [1.16.0-alpha] - 2026-02-09
+### Added
+- Added collection action-history undo flow (Group D task 26):
+- new `Undo` action in Collection toolbar
+- per-action reversible snapshots for quantity edits, remove, tag updates, and metadata edits
+- Added backend card-state restore API for deterministic undo:
+- frontend API: `setOwnedCardState` in `src/lib/backend.ts`
+- Tauri command: `set_owned_card_state` in `src-tauri/src/lib.rs`
+
+### Changed
+- Collection mutation handlers now record undo entries and restore previous card state safely.
+
 ## [1.15.0-alpha] - 2026-02-09
 ### Added
 - Added offline-first local account login gate before collection profile access:

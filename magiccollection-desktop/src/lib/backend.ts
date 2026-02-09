@@ -383,6 +383,29 @@ async function fallbackUpdateOwnedCardMetadata(
   return fallbackGetCollection(input.profileId)
 }
 
+async function fallbackSetOwnedCardState(input: {
+  profileId: string
+  card: OwnedCard
+}): Promise<OwnedCard[]> {
+  const current = loadCollection(input.profileId)
+  const next = normalizeCollectionCard({
+    ...input.card,
+    quantity: Math.max(0, Math.floor(input.card.quantity)),
+    foilQuantity: Math.max(0, Math.floor(input.card.foilQuantity)),
+    tags: [...input.card.tags],
+    updatedAt: nowIso(),
+  })
+
+  if (next.quantity + next.foilQuantity <= 0) {
+    delete current[input.card.scryfallId]
+  } else {
+    current[input.card.scryfallId] = next
+  }
+
+  saveCollection(input.profileId, current)
+  return fallbackGetCollection(input.profileId)
+}
+
 export async function listProfiles(): Promise<Profile[]> {
   if (!hasTauriRuntime()) {
     return fallbackListProfiles()
@@ -489,6 +512,16 @@ export async function updateOwnedCardMetadata(
     return fallbackUpdateOwnedCardMetadata(input)
   }
   return invoke<OwnedCard[]>('update_owned_card_metadata', { input })
+}
+
+export async function setOwnedCardState(input: {
+  profileId: string
+  card: OwnedCard
+}): Promise<OwnedCard[]> {
+  if (!hasTauriRuntime()) {
+    return fallbackSetOwnedCardState(input)
+  }
+  return invoke<OwnedCard[]>('set_owned_card_state', { input })
 }
 
 export function asCardMap(cards: OwnedCard[]): OwnedCardMap {
