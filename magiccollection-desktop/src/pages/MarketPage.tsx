@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { FormEvent, KeyboardEvent } from 'react'
 import { getMarketPriceTrends, recordMarketSnapshots } from '../lib/backend'
 import type {
   AddCardInput,
@@ -41,7 +41,50 @@ interface MarketPageProps {
 }
 
 const DEFAULT_QUERY = 'game:paper unique:prints'
-const DISPLAY_LIMIT = 60
+const DISPLAY_LIMIT = 120
+const DISPLAY_PAGE_SIZE = 30
+const SAVED_QUERIES_KEY = 'magiccollection.market.saved-queries.v1'
+const HELPER_QUERIES = [
+  'is:foil',
+  'rarity:mythic',
+  'set:lea',
+  't:legendary',
+  'c>=3',
+]
+
+function validateQuery(query: string): string {
+  const trimmed = query.trim()
+  if (!trimmed) {
+    return ''
+  }
+  const quoteCount = (trimmed.match(/"/g) ?? []).length
+  if (quoteCount % 2 !== 0) {
+    return 'Query warning: unmatched quote detected.'
+  }
+  if (trimmed.length < 2) {
+    return 'Query warning: very short query may return broad results.'
+  }
+  return ''
+}
+
+function parseScryfallUrlToQuery(text: string): string {
+  const trimmed = text.trim()
+  if (!trimmed.includes('scryfall.com/card/')) {
+    return ''
+  }
+  try {
+    const url = new URL(trimmed)
+    const segments = url.pathname.split('/').filter(Boolean)
+    const nameSegment = segments[3] ?? ''
+    if (!nameSegment) {
+      return ''
+    }
+    const cardName = decodeURIComponent(nameSegment).replace(/-/g, ' ').trim()
+    return cardName ? `!"${cardName}"` : ''
+  } catch {
+    return ''
+  }
+}
 
 function parseUsd(value: string | null | undefined): number | null {
   if (!value) {
@@ -119,6 +162,12 @@ export default function MarketPage({
   const [errorMessage, setErrorMessage] = useState('')
   const [results, setResults] = useState<MarketCard[]>([])
   const [isSyncingPrices, setIsSyncingPrices] = useState(false)
+  const [visibleLimit, setVisibleLimit] = useState(DISPLAY_PAGE_SIZE)
+  const [savedQueries, setSavedQueries] = useState<string[]>([])
+  const [activeCard, setActiveCard] = useState<MarketCard | null>(null)
+  const [queryWarning, setQueryWarning] = useState('')
+  const searchAbortRef = useRef<AbortController | null>(null)
+  const debounceRef = useRef<number | null>(null)
 
   const ownedTotals = useMemo(() => {
     return Object.values(ownedCards).reduce(
@@ -192,12 +241,19 @@ export default function MarketPage({
     setQueryLabel(trimmedQuery)
     setErrorMessage('')
     setIsLoading(true)
+    setVisibleLimit(DISPLAY_PAGE_SIZE)
+
+    if (searchAbortRef.current) {
+      searchAbortRef.current.abort()
+    }
+    const controller = new AbortController()
+    searchAbortRef.current = controller
 
     try {
       const endpoint = `https://api.scryfall.com/cards/search?q=${encodeURIComponent(
         trimmedQuery,
       )}&order=name&dir=asc&unique=prints`
-      const response = await fetch(endpoint)
+      const response = await fetch(endpoint, { signal: controller.signal })
 
       if (!response.ok) {
         if (response.status === 404) {
@@ -215,11 +271,15 @@ export default function MarketPage({
       setResults(cards)
       void mergeTrends(cards)
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        return
+      }
       setErrorMessage(
         error instanceof Error ? error.message : 'Unable to load market data.',
       )
       setResults([])
     } finally {
+      searchAbortRef.current = null
       setIsLoading(false)
     }
   }, [mergeTrends])
@@ -227,6 +287,41 @@ export default function MarketPage({
   useEffect(() => {
     runSearch(DEFAULT_QUERY)
   }, [runSearch])
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(SAVED_QUERIES_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw) as string[]
+        setSavedQueries(parsed.filter((entry) => !!entry.trim()).slice(0, 12))
+      }
+    } catch {
+      setSavedQueries([])
+    }
+  }, [])
+
+  useEffect(() => {
+    if (debounceRef.current !== null) {
+      window.clearTimeout(debounceRef.current)
+    }
+    debounceRef.current = window.setTimeout(() => {
+      const trimmed = queryInput.trim()
+      if (!trimmed || trimmed === queryLabel) {
+        return
+      }
+      void runSearch(trimmed)
+    }, 420)
+
+    return () => {
+      if (debounceRef.current !== null) {
+        window.clearTimeout(debounceRef.current)
+      }
+    }
+  }, [queryInput, queryLabel, runSearch])
+
+  useEffect(() => {
+    setQueryWarning(validateQuery(queryInput))
+  }, [queryInput])
 
   useEffect(() => {
     if (!results.length) {
@@ -249,6 +344,72 @@ export default function MarketPage({
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     runSearch(queryInput)
+  }
+
+  function appendHelperQuery(fragment: string) {
+    const current = queryInput.trim()
+    const next = current ? `${current} ${fragment}` : fragment
+    setQueryInput(next)
+  }
+
+  function applyDroppedText(text: string) {
+    const normalized = text.trim()
+    if (!normalized) {
+      return
+    }
+    const query = parseScryfallUrlToQuery(normalized) || normalized
+    setQueryInput(query)
+    void runSearch(query)
+  }
+
+  function saveCurrentQuery() {
+    const trimmed = queryLabel.trim()
+    if (!trimmed) {
+      return
+    }
+    const next = [trimmed, ...savedQueries.filter((entry) => entry !== trimmed)].slice(0, 12)
+    setSavedQueries(next)
+    window.localStorage.setItem(SAVED_QUERIES_KEY, JSON.stringify(next))
+  }
+
+  const visibleResults = results.slice(0, visibleLimit)
+
+  async function handleKeyboardAction(
+    event: KeyboardEvent<HTMLElement>,
+    card: MarketCard,
+  ) {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      setActiveCard(card)
+      return
+    }
+    if (event.key === '+') {
+      event.preventDefault()
+      await onAddCard({
+        scryfallId: card.scryfallId,
+        name: card.name,
+        setCode: card.setCode,
+        collectorNumber: card.collectorNumber,
+        imageUrl: card.imageUrl,
+        foil: false,
+        currentPrice: card.currentPrice,
+        tags: card.tags,
+      })
+      return
+    }
+    if (event.key.toLowerCase() === 'f') {
+      event.preventDefault()
+      await onAddCard({
+        scryfallId: card.scryfallId,
+        name: card.name,
+        setCode: card.setCode,
+        collectorNumber: card.collectorNumber,
+        imageUrl: card.imageUrl,
+        foil: true,
+        currentPrice: card.currentPrice,
+        tags: card.tags,
+      })
+    }
   }
 
   return (
@@ -275,20 +436,73 @@ export default function MarketPage({
         <input
           value={queryInput}
           onChange={(event) => setQueryInput(event.target.value)}
+          onPaste={(event) => {
+            const text = event.clipboardData.getData('text/plain')
+            const parsed = parseScryfallUrlToQuery(text)
+            if (parsed) {
+              event.preventDefault()
+              applyDroppedText(parsed)
+            }
+          }}
+          onDrop={(event) => {
+            const text = event.dataTransfer.getData('text/plain')
+            if (!text) {
+              return
+            }
+            event.preventDefault()
+            applyDroppedText(text)
+          }}
+          onDragOver={(event) => {
+            event.preventDefault()
+          }}
           placeholder="Scryfall query, e.g. set:lea, oracle:draw"
           aria-label="Scryfall search query"
         />
         <button className="button" type="submit" disabled={isLoading}>
           {isLoading ? 'Searching...' : 'Search'}
         </button>
+        <button className="button subtle" type="button" onClick={saveCurrentQuery}>
+          Save Query
+        </button>
       </form>
 
       <p className="muted small">Showing up to {DISPLAY_LIMIT} results for: {queryLabel}</p>
+      <div className="tag-line">
+        {HELPER_QUERIES.map((helper) => (
+          <button
+            key={helper}
+            className="tag-chip tag-chip-button"
+            type="button"
+            onClick={() => appendHelperQuery(helper)}
+          >
+            {helper}
+          </button>
+        ))}
+      </div>
+
+      {savedQueries.length > 0 ? (
+        <div className="tag-line">
+          {savedQueries.map((saved) => (
+            <button
+              key={saved}
+              className="tag-chip tag-chip-button selected"
+              type="button"
+              onClick={() => {
+                setQueryInput(saved)
+                void runSearch(saved)
+              }}
+            >
+              {saved}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {errorMessage ? <p className="error-line">{errorMessage}</p> : null}
+      {queryWarning ? <p className="muted small">{queryWarning}</p> : null}
 
       <div className="market-grid">
-        {results.map((card, index) => {
+        {visibleResults.map((card, index) => {
           const owned = ownedCards[card.scryfallId]
           const totalOwned = (owned?.quantity ?? 0) + (owned?.foilQuantity ?? 0)
           const foilOwned = owned?.foilQuantity ?? 0
@@ -301,6 +515,11 @@ export default function MarketPage({
               key={card.scryfallId}
               className="market-card"
               style={{ animationDelay: `${index * 12}ms` }}
+              onDoubleClick={() => setActiveCard(card)}
+              tabIndex={0}
+              onKeyDown={(event) => {
+                void handleKeyboardAction(event, card)
+              }}
             >
               <div className="card-image-wrap">
                 {totalOwned > 0 ? (
@@ -321,7 +540,9 @@ export default function MarketPage({
               </div>
 
               <div className="market-card-body">
-                <h3>{card.name}</h3>
+                <button className="linkish-title" type="button" onClick={() => setActiveCard(card)}>
+                  <h3>{card.name}</h3>
+                </button>
                 <p className="muted small">
                   {card.setCode.toUpperCase()} #{card.collectorNumber}
                 </p>
@@ -388,6 +609,104 @@ export default function MarketPage({
           )
         })}
       </div>
+
+      {visibleLimit < results.length ? (
+        <div className="centered-row">
+          <button
+            className="button subtle"
+            type="button"
+            onClick={() => setVisibleLimit((current) => current + DISPLAY_PAGE_SIZE)}
+          >
+            Load More Results
+          </button>
+        </div>
+      ) : null}
+
+      {activeCard ? (
+        <section className="version-panel">
+          <div className="version-head">
+            <div>
+              <h3>{activeCard.name}</h3>
+              <p className="muted small">
+                Printings with owned/unowned visibility and quick add controls.
+              </p>
+            </div>
+            <button className="button subtle tiny" type="button" onClick={() => setActiveCard(null)}>
+              Close
+            </button>
+          </div>
+          <div className="version-grid">
+            {[...results]
+              .filter((row) => row.name === activeCard.name)
+              .sort((a, b) => {
+                const aOwned = ownedCards[a.scryfallId] ? 1 : 0
+                const bOwned = ownedCards[b.scryfallId] ? 1 : 0
+                if (aOwned !== bOwned) {
+                  return bOwned - aOwned
+                }
+                return a.setCode.localeCompare(b.setCode)
+              })
+              .map((row) => {
+                const owned = ownedCards[row.scryfallId]
+                const totalOwned = (owned?.quantity ?? 0) + (owned?.foilQuantity ?? 0)
+                return (
+                  <article
+                    key={`detail-${row.scryfallId}`}
+                    className={`version-card ${totalOwned > 0 ? 'owned' : 'unowned'}`}
+                  >
+                    <div className="version-image-wrap">
+                      {row.imageUrl ? (
+                        <img src={row.imageUrl} alt={row.name} loading="lazy" />
+                      ) : null}
+                    </div>
+                    <div className="version-body">
+                      <p>{row.setCode.toUpperCase()} #{row.collectorNumber}</p>
+                      <p className="muted small">Owned: {totalOwned}</p>
+                      <div className="row-actions">
+                        <button
+                          className="button tiny"
+                          type="button"
+                          onClick={() =>
+                            onAddCard({
+                              scryfallId: row.scryfallId,
+                              name: row.name,
+                              setCode: row.setCode,
+                              collectorNumber: row.collectorNumber,
+                              imageUrl: row.imageUrl,
+                              foil: false,
+                              currentPrice: row.currentPrice,
+                              tags: row.tags,
+                            })
+                          }
+                        >
+                          +N
+                        </button>
+                        <button
+                          className="button tiny subtle"
+                          type="button"
+                          onClick={() =>
+                            onAddCard({
+                              scryfallId: row.scryfallId,
+                              name: row.name,
+                              setCode: row.setCode,
+                              collectorNumber: row.collectorNumber,
+                              imageUrl: row.imageUrl,
+                              foil: true,
+                              currentPrice: row.currentPrice,
+                              tags: row.tags,
+                            })
+                          }
+                        >
+                          +F
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                )
+              })}
+          </div>
+        </section>
+      ) : null}
     </section>
   )
 }

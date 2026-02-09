@@ -35,6 +35,12 @@ export interface OwnedCard {
   priceDelta: number | null
   priceDirection: PriceDirection
   lastPriceAt: string | null
+  conditionCode: string
+  language: string
+  locationName?: string | null
+  notes?: string | null
+  purchasePrice?: number | null
+  dateAdded?: string | null
 }
 
 export type OwnedCardMap = Record<string, OwnedCard>
@@ -104,4 +110,15 @@ export interface BulkTagRequest {
   scryfallIds: string[]
   tags: string[]
   includeAutoRules: boolean
+}
+
+export interface UpdateOwnedCardMetadataInput {
+  profileId: string
+  scryfallId: string
+  conditionCode?: string
+  language?: string
+  locationName?: string
+  notes?: string
+  purchasePrice?: number | null
+  dateAdded?: string
 }

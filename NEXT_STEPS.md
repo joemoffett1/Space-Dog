@@ -273,6 +273,33 @@ or PWA first then native wrapper.
 ## Remaining Big Task Backlog (35 Total, Grouped)
 Use this grouped execution queue to reduce commit noise. We will commit by feature group, not per individual task.
 
+## Group Execution Queue
+1. Group A: Sync Reliability and Recovery - `completed`
+2. Group B: Server Patch Pipeline Core - `in_progress`
+3. Group C: Search and Discovery UX - `completed`
+4. Group D: Collection Editing and Scale UX - `in_progress`
+5. Group E: CK Buylist and Sell Flow - `in_progress`
+6. Group F: Cross-Platform Core and Handoff - `in_progress`
+
+## Group Run Summary (2026-02-09, Session 3)
+1. Group A completed:
+- sync single-flight lock, timeout/retry policy, hash checks, diagnostics panel, cancel support, and DB optimize hook are implemented.
+2. Group B in progress:
+- `sync-service` now has daily pipeline automation (`build-daily`) and hardened endpoints (`/health`, `/metrics`, `/sync/*`) with rate limiting.
+- blocker: production hosting target and deployment credentials are not selected yet.
+3. Group C completed:
+- saved queries, helper chips, query validation hints, keyboard actions, and drag/drop Scryfall URL handoff are implemented in Market.
+4. Group D in progress:
+- per-card metadata edit modal and bulk metadata operations are implemented.
+- perf metrics logging/inspection is implemented.
+- blocker: full undo/action-history stack is not implemented yet.
+5. Group E in progress:
+- CK adapter scaffold, buylist metrics, and sell-intent handoff are implemented in Reports.
+- blocker: real CK API credentials/proxy endpoint are not configured yet (currently supports mock mode + optional proxy URL).
+6. Group F in progress:
+- cross-platform handoff scaffolding docs added in `shared-core/` and `web-client/`.
+- blocker: final auth direction and mobile store architecture are not finalized.
+
 ## Group A: Sync Reliability and Recovery (6 tasks, 1-2 commits)
 1. Add sync-run locking to prevent overlapping refresh jobs.
 2. Add sync timeout/cancel handling and explicit retry state.

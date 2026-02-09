@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
+﻿import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { AppNav } from './components/AppNav'
 import { ProfileGate } from './components/ProfileGate'
@@ -15,10 +15,13 @@ import {
   listProfiles,
   recordMarketSnapshots,
   removeCardFromCollection,
+  updateOwnedCardMetadata,
   updateCardQuantity,
 } from './lib/backend'
 import { parseArchidektCsv } from './lib/importers/archidekt'
+import { recordPerfMetric } from './lib/perfMetrics'
 import {
+  cancelCatalogSyncRun,
   getCatalogPriceRecords,
   getCatalogSyncStatus,
   seedDemoOutdatedCatalogOnce,
@@ -37,6 +40,7 @@ import type {
   AddCardInput,
   AppTab,
   CreateProfileRequest,
+  UpdateOwnedCardMetadataInput,
   OwnedCardMap,
   Profile,
 } from './types'
@@ -66,6 +70,8 @@ function App() {
   const [clockTick, setClockTick] = useState<number>(Date.now())
   const [syncProgressPct, setSyncProgressPct] = useState<number | null>(null)
   const [syncProgressText, setSyncProgressText] = useState<string>('')
+  const [tabSwitchStartedAt, setTabSwitchStartedAt] = useState<number | null>(null)
+  const refreshAbortRef = useRef<AbortController | null>(null)
 
   const activeProfile = useMemo(
     () => profiles.find((profile) => profile.id === activeProfileId) ?? null,
@@ -198,6 +204,15 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (tabSwitchStartedAt === null) {
+      return
+    }
+    const elapsed = performance.now() - tabSwitchStartedAt
+    recordPerfMetric(`tab:${activeTab}`, elapsed)
+    setTabSwitchStartedAt(null)
+  }, [activeTab, tabSwitchStartedAt])
+
+  useEffect(() => {
     if (!activeProfileId) {
       clearActiveProfileId()
       return
@@ -314,6 +329,11 @@ function App() {
     setActiveProfileId(null)
     setOwnedCards({})
     setActiveTab('collection')
+  }
+
+  function handleSelectTab(nextTab: AppTab) {
+    setTabSwitchStartedAt(performance.now())
+    setActiveTab(nextTab)
   }
 
   async function handleAddCard(input: MarketAddInput) {
@@ -448,6 +468,66 @@ function App() {
     }
   }
 
+  async function handleUpdateCardMetadata(
+    cardId: string,
+    metadata: Omit<UpdateOwnedCardMetadataInput, 'profileId' | 'scryfallId'>,
+  ): Promise<void> {
+    if (!activeProfile) {
+      return
+    }
+
+    setErrorMessage('')
+    setSyncProgressPct(null)
+    setSyncProgressText('')
+    setIsSyncing(true)
+    try {
+      const cards = await updateOwnedCardMetadata({
+        profileId: activeProfile.id,
+        scryfallId: cardId,
+        ...metadata,
+      })
+      setOwnedCards(asCardMap(cards))
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : 'Unable to update card metadata.',
+      )
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
+  async function handleBulkUpdateCardMetadata(
+    cardIds: string[],
+    metadata: Omit<UpdateOwnedCardMetadataInput, 'profileId' | 'scryfallId'>,
+  ): Promise<void> {
+    if (!activeProfile || !cardIds.length) {
+      return
+    }
+
+    setErrorMessage('')
+    setSyncProgressPct(null)
+    setSyncProgressText('')
+    setIsSyncing(true)
+    try {
+      let latestCards = await getCollection(activeProfile.id)
+      for (const cardId of cardIds) {
+        latestCards = await updateOwnedCardMetadata({
+          profileId: activeProfile.id,
+          scryfallId: cardId,
+          ...metadata,
+        })
+      }
+      setOwnedCards(asCardMap(latestCards))
+    } catch (error) {
+      await restoreCollectionFromBackend(activeProfile.id)
+      setErrorMessage(
+        error instanceof Error ? error.message : 'Unable to bulk update metadata.',
+      )
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
   async function handleRefreshCollectionPrices(): Promise<string> {
     if (!activeProfile) {
       return 'No active profile.'
@@ -462,10 +542,20 @@ function App() {
     setSyncProgressPct(0)
     setSyncProgressText('Starting')
     setIsSyncing(true)
+    const refreshController = new AbortController()
+    refreshAbortRef.current = refreshController
+
+    function ensureNotCanceled() {
+      if (refreshController.signal.aborted) {
+        throw new Error('Sync canceled by user.')
+      }
+    }
     try {
+      ensureNotCanceled()
       setSyncProgressPct(8)
       setSyncProgressText('Syncing patch version')
       const catalogSync = await syncCatalogFromMockPatches()
+      ensureNotCanceled()
       setSyncProgressPct(20)
       setSyncProgressText('Matching local price cache')
       const catalogPriceMap = await getCatalogPriceRecords(
@@ -491,6 +581,7 @@ function App() {
       if (directSnapshots.length) {
         await recordMarketSnapshots(directSnapshots)
       }
+      ensureNotCanceled()
       setSyncProgressPct(30)
       setSyncProgressText('Applying cached snapshots')
 
@@ -505,6 +596,7 @@ function App() {
         const response = await fetch('https://api.scryfall.com/cards/collection', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: refreshController.signal,
           body: JSON.stringify({
             identifiers: batch.map((card) => ({ id: card.scryfallId })),
           }),
@@ -547,6 +639,7 @@ function App() {
         if (snapshots.length) {
           await recordMarketSnapshots(snapshots)
         }
+        ensureNotCanceled()
 
         const batchIndex = Math.floor(i / SCRYFALL_COLLECTION_BATCH) + 1
         const batchTotal = Math.max(1, Math.ceil(missingCards.length / SCRYFALL_COLLECTION_BATCH))
@@ -560,6 +653,7 @@ function App() {
 
       setSyncProgressPct(98)
       setSyncProgressText('Finalizing collection trends')
+      ensureNotCanceled()
       await restoreCollectionFromBackend(activeProfile.id)
       try {
         const status = await getCatalogSyncStatus()
@@ -579,16 +673,30 @@ function App() {
         missingCards.length
       }.`
     } catch (error) {
+      if (refreshController.signal.aborted) {
+        return 'Sync canceled.'
+      }
       setErrorMessage(
         error instanceof Error ? error.message : 'Unable to refresh prices from Scryfall.',
       )
       return error instanceof Error ? error.message : 'Price refresh failed.'
     } finally {
+      refreshAbortRef.current = null
       window.setTimeout(() => {
         setSyncProgressPct(null)
         setSyncProgressText('')
       }, 800)
       setIsSyncing(false)
+    }
+  }
+
+  function handleCancelSync() {
+    const canceledCatalog = cancelCatalogSyncRun()
+    if (refreshAbortRef.current && !refreshAbortRef.current.signal.aborted) {
+      refreshAbortRef.current.abort()
+    }
+    if (canceledCatalog || refreshAbortRef.current) {
+      setSyncProgressText('Canceling')
     }
   }
 
@@ -743,12 +851,14 @@ function App() {
           <button
             className="refresh-icon-button"
             type="button"
-            onClick={() => void handleRefreshCollectionPrices()}
-            disabled={isSyncing || !refreshEnabled}
-            title={refreshTitle}
-            aria-label="Refresh catalog data build"
+            onClick={() =>
+              isSyncing ? handleCancelSync() : void handleRefreshCollectionPrices()
+            }
+            disabled={!isSyncing && !refreshEnabled}
+            title={isSyncing ? 'Cancel sync' : refreshTitle}
+            aria-label={isSyncing ? 'Cancel sync' : 'Refresh catalog data build'}
           >
-            ↻
+            {isSyncing ? 'X' : 'R'}
           </button>
           <button className="button subtle" onClick={handleSignOut}>
             Change Collection
@@ -758,7 +868,7 @@ function App() {
 
       {errorMessage ? <p className="error-line">{errorMessage}</p> : null}
 
-      <AppNav activeTab={activeTab} onSelectTab={setActiveTab} />
+      <AppNav activeTab={activeTab} onSelectTab={handleSelectTab} />
 
       <main className="app-main">
         {activeTab === 'collection' && (
@@ -769,6 +879,8 @@ function App() {
             onDecrement={handleDecrementCardQuantity}
             onRemove={handleRemoveCard}
             onTagCard={handleTagCard}
+            onUpdateMetadata={handleUpdateCardMetadata}
+            onBulkUpdateMetadata={handleBulkUpdateCardMetadata}
             onOpenMarket={() => setActiveTab('market')}
             onImportArchidektCsv={handleImportArchidektCsv}
             isSyncing={isSyncing}
@@ -805,3 +917,4 @@ function App() {
 }
 
 export default App
+

@@ -14,6 +14,7 @@ interface ManifestEntry {
   version: string
   snapshot?: string
   patchFromPrevious?: string
+  snapshotHash?: string
   createdAt: string
 }
 
@@ -21,6 +22,7 @@ interface CompactedPatchEntry {
   fromVersion: string
   toVersion: string
   path: string
+  patchHash?: string
   createdAt: string
 }
 
@@ -46,6 +48,7 @@ interface PatchFile {
   added: CatalogPriceRecord[]
   updated: CatalogPriceRecord[]
   removed: string[]
+  patchHash?: string
 }
 
 interface CatalogSyncStateRow {
@@ -67,6 +70,18 @@ interface CatalogApplyResult {
   addedCount: number
   updatedCount: number
   removedCount: number
+}
+
+export interface SyncDiagnostics {
+  lastRunAt: string | null
+  lastOutcome: 'idle' | 'running' | 'success' | 'error' | 'canceled'
+  lastStrategy: CatalogSyncResult['strategy'] | null
+  lastDurationMs: number | null
+  lastError: string | null
+  inFlightJoinCount: number
+  retryCount: number
+  cancelCount: number
+  timeoutMs: number
 }
 
 export interface CatalogSyncResult {
@@ -96,6 +111,12 @@ const DEFAULT_COMPACTED_THRESHOLD = 5
 const DEFAULT_FORCE_FULL_THRESHOLD = 21
 const DEFAULT_EXPECTED_PUBLISH_TIME_UTC = '22:30'
 const DEFAULT_REFRESH_UNLOCK_LAG_MINUTES = 60
+const SYNC_DIAGNOSTICS_KEY = 'magiccollection.catalog.sync-diagnostics.v1'
+const DEFAULT_FETCH_TIMEOUT_MS = 20_000
+const DEFAULT_FETCH_RETRIES = 1
+
+let activeSyncRun: Promise<CatalogSyncResult> | null = null
+let activeSyncAbortController: AbortController | null = null
 
 function hasWindow(): boolean {
   return typeof window !== 'undefined'
@@ -103,6 +124,92 @@ function hasWindow(): boolean {
 
 function hasTauriRuntime(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+}
+
+function nowIso(): string {
+  return new Date().toISOString()
+}
+
+function readSyncDiagnostics(): SyncDiagnostics {
+  if (!hasWindow()) {
+    return {
+      lastRunAt: null,
+      lastOutcome: 'idle',
+      lastStrategy: null,
+      lastDurationMs: null,
+      lastError: null,
+      inFlightJoinCount: 0,
+      retryCount: 0,
+      cancelCount: 0,
+      timeoutMs: DEFAULT_FETCH_TIMEOUT_MS,
+    }
+  }
+
+  try {
+    const raw = window.localStorage.getItem(SYNC_DIAGNOSTICS_KEY)
+    if (!raw) {
+      return {
+        lastRunAt: null,
+        lastOutcome: 'idle',
+        lastStrategy: null,
+        lastDurationMs: null,
+        lastError: null,
+        inFlightJoinCount: 0,
+        retryCount: 0,
+        cancelCount: 0,
+        timeoutMs: DEFAULT_FETCH_TIMEOUT_MS,
+      }
+    }
+    return JSON.parse(raw) as SyncDiagnostics
+  } catch {
+    return {
+      lastRunAt: null,
+      lastOutcome: 'idle',
+      lastStrategy: null,
+      lastDurationMs: null,
+      lastError: null,
+      inFlightJoinCount: 0,
+      retryCount: 0,
+      cancelCount: 0,
+      timeoutMs: DEFAULT_FETCH_TIMEOUT_MS,
+    }
+  }
+}
+
+function writeSyncDiagnostics(next: SyncDiagnostics): void {
+  if (!hasWindow()) {
+    return
+  }
+  window.localStorage.setItem(SYNC_DIAGNOSTICS_KEY, JSON.stringify(next))
+}
+
+function updateSyncDiagnostics(
+  mutate: (current: SyncDiagnostics) => SyncDiagnostics,
+): SyncDiagnostics {
+  const current = readSyncDiagnostics()
+  const next = mutate(current)
+  writeSyncDiagnostics(next)
+  return next
+}
+
+export function getSyncDiagnostics(): SyncDiagnostics {
+  return readSyncDiagnostics()
+}
+
+export function resetSyncDiagnostics(): SyncDiagnostics {
+  const baseline: SyncDiagnostics = {
+    lastRunAt: null,
+    lastOutcome: 'idle',
+    lastStrategy: null,
+    lastDurationMs: null,
+    lastError: null,
+    inFlightJoinCount: 0,
+    retryCount: 0,
+    cancelCount: 0,
+    timeoutMs: DEFAULT_FETCH_TIMEOUT_MS,
+  }
+  writeSyncDiagnostics(baseline)
+  return baseline
 }
 
 function readStoredCatalogMap(): Record<string, CatalogPriceRecord> {
@@ -142,12 +249,76 @@ function writeCatalogVersion(version: string): void {
   window.localStorage.setItem(CATALOG_VERSION_KEY, version)
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error(`Catalog sync request failed (${response.status}) for ${url}`)
+interface FetchJsonOptions {
+  timeoutMs?: number
+  retries?: number
+  signal?: AbortSignal
+}
+
+async function fetchJson<T>(url: string, options?: FetchJsonOptions): Promise<T> {
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS
+  const retries = options?.retries ?? DEFAULT_FETCH_RETRIES
+  const externalSignal = options?.signal ?? activeSyncAbortController?.signal
+  let attempts = 0
+  let lastError: Error | null = null
+
+  while (attempts <= retries) {
+    if (externalSignal?.aborted) {
+      throw new Error('Catalog sync canceled by user.')
+    }
+    attempts += 1
+    const controller = new AbortController()
+    const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs)
+    const onExternalAbort = () => controller.abort()
+    externalSignal?.addEventListener('abort', onExternalAbort, { once: true })
+
+    try {
+      const response = await fetch(url, { signal: controller.signal })
+      if (!response.ok) {
+        throw new Error(`Catalog sync request failed (${response.status}) for ${url}`)
+      }
+      return (await response.json()) as T
+    } catch (error) {
+      const asError =
+        error instanceof Error
+          ? error
+          : new Error('Unknown catalog sync request failure.')
+      if (asError.name === 'AbortError' && externalSignal?.aborted) {
+        throw new Error('Catalog sync canceled by user.')
+      }
+      lastError = asError
+      if (attempts <= retries) {
+        updateSyncDiagnostics((current) => ({
+          ...current,
+          retryCount: current.retryCount + 1,
+          timeoutMs,
+          lastError: `Retrying catalog request (${attempts}/${retries + 1}) for ${url}`,
+        }))
+      }
+    } finally {
+      externalSignal?.removeEventListener('abort', onExternalAbort)
+      globalThis.clearTimeout(timeout)
+    }
   }
-  return (await response.json()) as T
+
+  throw (
+    lastError ??
+    new Error(`Catalog sync request failed after ${retries + 1} attempts for ${url}`)
+  )
+}
+
+async function computePayloadHash(payload: unknown): Promise<string | null> {
+  const serialized = JSON.stringify(payload)
+  if (typeof serialized !== 'string') {
+    return null
+  }
+  if (!globalThis.crypto?.subtle || !globalThis.TextEncoder) {
+    return null
+  }
+  const bytes = new TextEncoder().encode(serialized)
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes)
+  const hashBytes = Array.from(new Uint8Array(digest))
+  return hashBytes.map((value) => value.toString(16).padStart(2, '0')).join('')
 }
 
 function asRecordMap(records: CatalogPriceRecord[]): Record<string, CatalogPriceRecord> {
@@ -274,6 +445,15 @@ async function applyBackendPatch(input: {
       patchHash: input.patchHash ?? null,
       strategy: input.strategy ?? 'chain',
     },
+  })
+}
+
+async function optimizeBackendCatalogStorage(): Promise<void> {
+  if (!hasTauriRuntime()) {
+    return
+  }
+  await invoke('optimize_catalog_storage', {
+    dataset: CATALOG_DATASET,
   })
 }
 
@@ -431,9 +611,11 @@ async function syncCatalogWithBackend(
       throw new Error('Catalog manifest does not contain an initial snapshot.')
     }
     const rows = await loadSnapshotRecords(snapshotPath)
+    const snapshotHash = await computePayloadHash(rows)
     const result = await applyBackendSnapshot({
       version: manifest.latestVersion,
       records: rows,
+      snapshotHash: snapshotHash ?? undefined,
       strategy: 'full',
     })
 
@@ -472,9 +654,11 @@ async function syncCatalogWithBackend(
       throw new Error('Catalog sync cannot recover because no snapshot is available.')
     }
     const rows = await loadSnapshotRecords(snapshotPath)
+    const snapshotHash = await computePayloadHash(rows)
     const result = await applyBackendSnapshot({
       version: manifest.latestVersion,
       records: rows,
+      snapshotHash: snapshotHash ?? undefined,
       strategy: 'full',
     })
     return {
@@ -498,9 +682,11 @@ async function syncCatalogWithBackend(
       throw new Error('Full sync required but latest snapshot is missing from manifest.')
     }
     const rows = await loadSnapshotRecords(snapshotPath)
+    const snapshotHash = await computePayloadHash(rows)
     const result = await applyBackendSnapshot({
       version: manifest.latestVersion,
       records: rows,
+      snapshotHash: snapshotHash ?? undefined,
       strategy: 'full',
     })
     return {
@@ -524,8 +710,24 @@ async function syncCatalogWithBackend(
 
     if (compacted?.path) {
       const patch = await fetchJson<PatchFile>(`/mock-sync/${compacted.path}`)
+      const computedPatchHash = await computePayloadHash(patch)
+      if (
+        compacted.patchHash &&
+        computedPatchHash &&
+        compacted.patchHash !== computedPatchHash
+      ) {
+        throw new Error(
+          `Compacted patch hash mismatch for ${compacted.path}: expected ${compacted.patchHash}, got ${computedPatchHash}.`,
+        )
+      }
+      if (patch.patchHash && computedPatchHash && patch.patchHash !== computedPatchHash) {
+        throw new Error(
+          `Compacted patch payload hash mismatch for ${compacted.path}: expected ${patch.patchHash}, got ${computedPatchHash}.`,
+        )
+      }
       const result = await applyBackendPatch({
         patch,
+        patchHash: computedPatchHash ?? compacted.patchHash ?? patch.patchHash,
         strategy: 'compacted',
       })
       appliedPatches = 1
@@ -549,8 +751,15 @@ async function syncCatalogWithBackend(
         continue
       }
       const patch = await fetchJson<PatchFile>(`/mock-sync/${entry.patchFromPrevious}`)
+      const computedPatchHash = await computePayloadHash(patch)
+      if (patch.patchHash && computedPatchHash && patch.patchHash !== computedPatchHash) {
+        throw new Error(
+          `Patch payload hash mismatch for ${entry.patchFromPrevious}: expected ${patch.patchHash}, got ${computedPatchHash}.`,
+        )
+      }
       const result = await applyBackendPatch({
         patch,
+        patchHash: computedPatchHash ?? patch.patchHash,
         strategy: 'chain',
       })
       appliedPatches += 1
@@ -570,9 +779,11 @@ async function syncCatalogWithBackend(
       throw new Error('Catalog sync did not reach latest and no recovery snapshot exists.')
     }
     const rows = await loadSnapshotRecords(snapshotPath)
+    const snapshotHash = await computePayloadHash(rows)
     const result = await applyBackendSnapshot({
       version: manifest.latestVersion,
       records: rows,
+      snapshotHash: snapshotHash ?? undefined,
       strategy: 'full',
     })
     return {
@@ -767,12 +978,81 @@ async function syncCatalogWithLocalStorage(
 }
 
 export async function syncCatalogFromMockPatches(): Promise<CatalogSyncResult> {
-  const manifest = await fetchJson<SyncManifest>('/mock-sync/manifest.json')
-  const policy = resolvePolicy(manifest)
-
-  if (hasTauriRuntime()) {
-    return syncCatalogWithBackend(manifest, policy)
+  if (activeSyncRun) {
+    updateSyncDiagnostics((current) => ({
+      ...current,
+      inFlightJoinCount: current.inFlightJoinCount + 1,
+      lastOutcome: 'running',
+    }))
+    return activeSyncRun
   }
 
-  return syncCatalogWithLocalStorage(manifest, policy)
+  const startedAt = Date.now()
+  updateSyncDiagnostics((current) => ({
+    ...current,
+    lastRunAt: nowIso(),
+    lastOutcome: 'running',
+    lastError: null,
+    lastStrategy: null,
+    retryCount: 0,
+    timeoutMs: DEFAULT_FETCH_TIMEOUT_MS,
+  }))
+
+  activeSyncRun = (async () => {
+    activeSyncAbortController = new AbortController()
+    try {
+      const manifest = await fetchJson<SyncManifest>('/mock-sync/manifest.json')
+      const policy = resolvePolicy(manifest)
+      const result = hasTauriRuntime()
+        ? await syncCatalogWithBackend(manifest, policy)
+        : await syncCatalogWithLocalStorage(manifest, policy)
+
+      if (
+        hasTauriRuntime() &&
+        (result.strategy === 'full' || result.added + result.updated + result.removed > 4000)
+      ) {
+        await optimizeBackendCatalogStorage()
+      }
+
+      updateSyncDiagnostics((current) => ({
+        ...current,
+        lastRunAt: nowIso(),
+        lastOutcome: 'success',
+        lastStrategy: result.strategy,
+        lastDurationMs: Date.now() - startedAt,
+        lastError: null,
+      }))
+
+      return result
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown catalog sync failure.'
+      const canceled = message.toLowerCase().includes('canceled')
+      updateSyncDiagnostics((current) => ({
+        ...current,
+        lastRunAt: nowIso(),
+        lastOutcome: canceled ? 'canceled' : 'error',
+        lastDurationMs: Date.now() - startedAt,
+        lastError: message,
+      }))
+      throw error
+    } finally {
+      activeSyncAbortController = null
+      activeSyncRun = null
+    }
+  })()
+
+  return activeSyncRun
+}
+
+export function cancelCatalogSyncRun(): boolean {
+  if (!activeSyncAbortController || activeSyncAbortController.signal.aborted) {
+    return false
+  }
+  activeSyncAbortController.abort()
+  updateSyncDiagnostics((current) => ({
+    ...current,
+    cancelCount: current.cancelCount + 1,
+  }))
+  return true
 }

@@ -41,6 +41,12 @@ struct OwnedCardDto {
   price_delta: Option<f64>,
   price_direction: String,
   last_price_at: Option<String>,
+  condition_code: String,
+  language: String,
+  location_name: Option<String>,
+  notes: Option<String>,
+  purchase_price: Option<f64>,
+  date_added: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -91,6 +97,19 @@ struct BulkUpdateTagsInput {
   scryfall_ids: Vec<String>,
   tags: Vec<String>,
   include_auto_rules: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateOwnedCardMetadataInput {
+  profile_id: String,
+  scryfall_id: String,
+  condition_code: Option<String>,
+  language: Option<String>,
+  location_name: Option<String>,
+  notes: Option<String>,
+  purchase_price: Option<f64>,
+  date_added: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -692,10 +711,17 @@ fn load_collection_rows(connection: &Connection, profile_id: &str) -> Result<Vec
          p.image_normal_url,
          oi.quantity,
          oi.foil_quantity,
-         oi.updated_at
+         oi.updated_at,
+         oi.condition_code,
+         oi.language,
+         l.name,
+         oi.notes,
+         oi.purchase_price,
+         oi.date_added
        FROM owned_items oi
        JOIN printings p ON p.id = oi.printing_id
        JOIN cards c ON c.id = p.card_id
+       LEFT JOIN locations l ON l.id = oi.location_id
        WHERE oi.profile_id = ?1
          AND (oi.quantity > 0 OR oi.foil_quantity > 0)
        ORDER BY c.name COLLATE NOCASE",
@@ -714,6 +740,12 @@ fn load_collection_rows(connection: &Connection, profile_id: &str) -> Result<Vec
         row.get::<usize, i64>(6)?,
         row.get::<usize, i64>(7)?,
         row.get::<usize, String>(8)?,
+        row.get::<usize, String>(9)?,
+        row.get::<usize, String>(10)?,
+        row.get::<usize, Option<String>>(11)?,
+        row.get::<usize, Option<String>>(12)?,
+        row.get::<usize, Option<f64>>(13)?,
+        row.get::<usize, Option<String>>(14)?,
       ))
     })
     .map_err(|e| e.to_string())?;
@@ -730,6 +762,12 @@ fn load_collection_rows(connection: &Connection, profile_id: &str) -> Result<Vec
       quantity,
       foil_quantity,
       updated_at,
+      condition_code,
+      language,
+      location_name,
+      notes,
+      purchase_price,
+      date_added,
     ) = row.map_err(|e| e.to_string())?;
 
     let existing_tags = load_tags_for_owned_item(connection, &owned_item_id)?;
@@ -751,6 +789,12 @@ fn load_collection_rows(connection: &Connection, profile_id: &str) -> Result<Vec
       price_delta: trend.price_delta,
       price_direction: trend.price_direction,
       last_price_at: trend.last_price_at,
+      condition_code,
+      language,
+      location_name,
+      notes,
+      purchase_price,
+      date_added,
     });
   }
 
@@ -1145,6 +1189,111 @@ fn bulk_update_tags(
 }
 
 #[tauri::command]
+fn update_owned_card_metadata(
+  state: State<'_, AppState>,
+  input: UpdateOwnedCardMetadataInput,
+) -> Result<Vec<OwnedCardDto>, String> {
+  let connection = open_database(&state.db_path)?;
+  ensure_profile_exists(&connection, &input.profile_id)?;
+
+  let found: Option<String> = connection
+    .query_row(
+      "SELECT id
+       FROM owned_items
+       WHERE profile_id = ?1
+         AND printing_id = ?2
+       ORDER BY updated_at DESC
+       LIMIT 1",
+      params![&input.profile_id, &input.scryfall_id],
+      |row| row.get(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())?;
+
+  let Some(owned_item_id) = found else {
+    return Err(format!("Owned card not found for {}", input.scryfall_id));
+  };
+
+  let mut location_id: Option<String> = None;
+  if let Some(location_name) = input.location_name.as_deref() {
+    let trimmed = location_name.trim();
+    if !trimmed.is_empty() {
+      let existing_location: Option<String> = connection
+        .query_row(
+          "SELECT id FROM locations WHERE profile_id = ?1 AND lower(name) = lower(?2) LIMIT 1",
+          params![&input.profile_id, trimmed],
+          |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+      location_id = if let Some(id) = existing_location {
+        Some(id)
+      } else {
+        let id = Uuid::new_v4().to_string();
+        let now = now_iso();
+        connection
+          .execute(
+            "INSERT INTO locations (id, profile_id, name, type, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'box', ?4, ?4)",
+            params![&id, &input.profile_id, trimmed, now],
+          )
+          .map_err(|e| e.to_string())?;
+        Some(id)
+      };
+    }
+  }
+
+  let next_condition = input
+    .condition_code
+    .as_deref()
+    .map(|value| value.trim().to_uppercase())
+    .filter(|value| !value.is_empty())
+    .unwrap_or_else(|| "NM".to_string());
+  let next_language = input
+    .language
+    .as_deref()
+    .map(|value| value.trim().to_lowercase())
+    .filter(|value| !value.is_empty())
+    .unwrap_or_else(|| "en".to_string());
+  let notes = input
+    .notes
+    .as_deref()
+    .map(|value| value.trim().to_string())
+    .filter(|value| !value.is_empty());
+  let date_added = input
+    .date_added
+    .as_deref()
+    .map(|value| value.trim().to_string())
+    .filter(|value| !value.is_empty());
+
+  connection
+    .execute(
+      "UPDATE owned_items
+       SET condition_code = ?1,
+           language = ?2,
+           location_id = ?3,
+           notes = ?4,
+           purchase_price = ?5,
+           date_added = ?6,
+           updated_at = ?7
+       WHERE id = ?8",
+      params![
+        next_condition,
+        next_language,
+        location_id,
+        notes,
+        input.purchase_price,
+        date_added,
+        now_iso(),
+        owned_item_id
+      ],
+    )
+    .map_err(|e| e.to_string())?;
+
+  load_collection_rows(&connection, &input.profile_id)
+}
+
+#[tauri::command]
 fn get_catalog_sync_state(
   state: State<'_, AppState>,
   dataset: Option<String>,
@@ -1382,6 +1531,29 @@ fn reset_catalog_sync_state_for_test(
 }
 
 #[tauri::command]
+fn optimize_catalog_storage(
+  state: State<'_, AppState>,
+  dataset: Option<String>,
+) -> Result<String, String> {
+  let connection = open_database(&state.db_path)?;
+  let normalized_dataset = normalize_catalog_dataset(dataset.as_deref())?;
+
+  connection
+    .execute_batch(
+      "
+      PRAGMA optimize;
+      ANALYZE catalog_cards;
+      REINDEX idx_catalog_cards_name;
+      REINDEX idx_catalog_cards_set_collector;
+      VACUUM;
+      ",
+    )
+    .map_err(|e| e.to_string())?;
+
+  Ok(format!("Catalog storage optimized for dataset '{}'.", normalized_dataset))
+}
+
+#[tauri::command]
 fn record_market_snapshots(
   state: State<'_, AppState>,
   snapshots: Vec<MarketSnapshotInput>,
@@ -1457,11 +1629,13 @@ pub fn run() {
       remove_card_from_collection,
       import_collection_rows,
       bulk_update_tags,
+      update_owned_card_metadata,
       get_catalog_sync_state,
       get_catalog_price_records,
       apply_catalog_snapshot,
       apply_catalog_patch,
       reset_catalog_sync_state_for_test,
+      optimize_catalog_storage,
       record_market_snapshots,
       get_market_price_trends
     ])

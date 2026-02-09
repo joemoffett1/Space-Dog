@@ -40,3 +40,11 @@ magiccollection-desktop/logs/
 /tcgtracker.dat
 /tcglow_reference.txt
 /tcgtracking_*
+
+# Sync-service generated artifacts
+sync-service/__pycache__/
+sync-service/data/manifest.json
+sync-service/data/versions_index.json
+sync-service/data/versions/
+sync-service/data/patches/
+sync-service/data/compacted/

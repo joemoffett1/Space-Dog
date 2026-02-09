@@ -1,0 +1,28 @@
+{
+  "versions": [
+    {
+      "version": "v250204",
+      "snapshot": "versions/v250204.snapshot.json",
+      "createdAt": "2025-02-04T22:30:00Z"
+    },
+    {
+      "version": "v260208",
+      "patchFromPrevious": "versions/v260208.patch.json",
+      "createdAt": "2026-02-08T22:30:00Z"
+    },
+    {
+      "version": "v260209",
+      "patchFromPrevious": "versions/v260209.patch.json",
+      "snapshot": "versions/v260209.snapshot.json",
+      "createdAt": "2026-02-09T22:30:00Z"
+    }
+  ],
+  "compactedPatches": [
+    {
+      "fromVersion": "v250204",
+      "toVersion": "v260209",
+      "path": "versions/v260209.compacted.from-v250204.json",
+      "createdAt": "2026-02-09T23:45:00Z"
+    }
+  ]
+}

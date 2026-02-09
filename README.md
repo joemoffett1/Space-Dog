@@ -1,45 +1,68 @@
-# MagicCollection Remote Update Board
+﻿# MagicCollection Remote Update Board
 
 This README is currently the primary remote update surface for project progress.
-It includes a quick summary, test focus, and a full changelog mirror.
+It includes a quick summary, blockers, test focus, and a full changelog mirror.
 
 Last updated: 2026-02-09
 Current stage: `1.x.x-alpha`
 
-## Features Added (Since Recent Input)
-- DB-backed catalog sync foundation in Tauri:
-  - Catalog tables for card records, sync state, and patch history.
-  - Transactional patch/snapshot apply commands with rollback safety.
-  - Deterministic state hash tracking for sync integrity.
-- Batched catalog price lookup during collection refresh:
-  - Replaced per-card local lookup path with one batched retrieval path.
-- Git + GitHub project bootstrap:
-  - Repository initialized and published to `joemoffett1/Space-Dog`.
-  - Root `.gitignore` added to keep large local datasets/caches out of git history.
+## Features Added (This Run)
+- Group A sync reliability:
+  - single-flight sync lock, timeout/retry handling, hash checks, cancel support, diagnostics counters, DB optimize hook.
+- Group B sync-service core:
+  - `sync_pipeline.py` daily build flow (`build-daily`) for snapshot normalization, incremental patches, compacted patches, and manifest generation.
+  - `server.py` endpoints for `/health`, `/metrics`, `/sync/status`, `/sync/patch`, `/sync/snapshot` with strategy hints and rate limiting.
+- Group C search/discovery:
+  - market query validation hints, keyboard actions (`Enter`, `+`, `F`), and Scryfall URL drag/drop-paste handoff.
+- Group D collection edit depth:
+  - per-card metadata editing (condition/language/location/notes/purchase/date).
+  - bulk metadata updates for selected cards.
+  - performance metrics recorder surfaced in Settings.
+- Group E CK flow scaffold:
+  - CK adapter with feature flag + optional proxy endpoint.
+  - buylist payout/coverage metrics and "Sell to CK" intent handoff in Reports.
+- Group F cross-platform handoff:
+  - added shared contract docs in `shared-core/` and web bootstrap docs in `web-client/`.
 
-## Features Updated (Since Recent Input)
-- Catalog sync runtime path updated:
-  - Tauri runtime now uses backend DB sync state/patch flow.
-  - Browser/dev fallback path remains available.
-- Refresh hover UX updated:
-  - Tooltip now shows both remaining time and exact local unlock timestamp.
+## Features Updated (This Run)
+- Refresh control now supports canceling active sync instead of only being disabled.
+- Sync diagnostics now distinguish canceled runs from failures.
+- Owned card model now includes metadata fields from backend through frontend UI.
+
+## Blockers (Logged And Bypassed)
+- Group B blocker:
+  - production hosting stack is not finalized (`Cloudflare` vs `Node` deployment path).
+- Group D blocker:
+  - full undo/action-history stack is not implemented yet.
+- Group E blocker:
+  - live CK API/proxy credentials are not configured; mock mode is active.
+- Group F blockers:
+  - cloud auth direction and mobile local-store architecture are not finalized.
 
 ## Things You Need To Test
-- Sync state behavior:
-  - Confirm `Synced` / `Not Synced` / `Syncing...` transitions remain correct after app restart and machine reboot.
-- Refresh behavior:
-  - Trigger refresh and verify progress completes, then sync state flips correctly.
-- Version transition behavior:
-  - Confirm old build -> latest build transition updates state without getting stuck.
-- Price refresh behavior:
-  - Verify cards in collection receive price updates and trend data after refresh.
-- Error handling:
-  - Test with network disabled during refresh and confirm recovery path on next refresh.
-- Profile flow:
-  - Confirm create/open/switch profile still behaves correctly after sync backend changes.
+- Sync cancel path:
+  - start refresh, press cancel, confirm state exits cleanly and app remains responsive.
+- Collection metadata edits:
+  - open card edit modal, save metadata, confirm values persist after app restart.
+- Bulk metadata:
+  - select multiple cards, apply condition/language/location, confirm all selected cards update.
+- Market keyboard + drop flow:
+  - focus a market card and use `+`/`F`/`Enter`.
+  - drag or paste a Scryfall card URL into search and confirm query auto-runs.
+- CK reports:
+  - open Reports, refresh CK quotes, validate cash/credit/coverage numbers and sell-intent button behavior.
+- Perf metrics:
+  - switch tabs several times and confirm Settings shows new `tab:*` timing rows.
+
+## Group Status
+1. Group A: `completed`
+2. Group B: `in_progress` (hosting decision blocker)
+3. Group C: `completed`
+4. Group D: `in_progress` (undo/action history pending)
+5. Group E: `in_progress` (live CK endpoint pending)
+6. Group F: `in_progress` (auth/mobile architecture pending)
 
 ## Full Changelog
-
 # CHANGELOG
 
 All notable changes to this project are documented in this file.
@@ -50,12 +73,102 @@ Versioning policy for alpha:
 - Increment `patch` (`x` in `1.0.x-alpha`) for updates/fixes to existing features.
 - Use engineering discretion on feature vs update.
 
+## [1.14.0-alpha] - 2026-02-09
+### Added
+- Added cross-platform handoff scaffolding docs:
+- `shared-core/README.md`
+- `web-client/README.md`
+- Added desktop drag/drop and paste handoff support for Scryfall URLs into Market search.
+
+### Notes
+- Auth strategy and mobile local-store architecture remain open decisions.
+
+## [1.13.0-alpha] - 2026-02-09
+### Added
+- Added CK adapter scaffold in `src/lib/ckAdapter.ts` with feature flags:
+- `VITE_ENABLE_CK`
+- optional `VITE_CK_PROXY_URL`
+- Added CK buylist analytics and sell-intent flow to Reports:
+- cash/credit payout metrics
+- coverage percentage
+- top quote list
+- sell-intent link launch
+
+### Notes
+- Live CK integration requires a configured proxy/API endpoint; fallback mock mode is active by default.
+
+## [1.12.0-alpha] - 2026-02-09
+### Added
+- Added per-card metadata editing (condition, language, location, notes, purchase price, date added).
+- Added bulk metadata operations for selected cards in Collection view.
+- Added local performance metric recorder (`tab:<name>` timings) and Settings diagnostics display.
+- Added backend/frontend metadata fields parity for owned cards.
+
+### Changed
+- Collection rows and image cards now include metadata-driven edit actions.
+
+## [1.11.0-alpha] - 2026-02-09
+### Added
+- Added Market keyboard actions:
+- `Enter` opens detail drawer
+- `+` adds nonfoil
+- `F` adds foil
+- Added query validation warnings and saved-query UX refinements.
+
+### Changed
+- Market card interactions are now keyboard-first and focusable.
+
+## [1.10.0-alpha] - 2026-02-09
+### Added
+- Added production-shaped sync pipeline scaffold in `sync-service/`:
+- daily build command (`build-daily`)
+- snapshot normalization
+- incremental patch generation
+- compacted patch generation
+- manifest generation from version index
+- Added local sync API hardening:
+- `/health` and `/metrics`
+- strategy-aware `/sync/status`
+- `/sync/patch` and `/sync/snapshot` improvements
+- per-IP rate limiting
+
+### Changed
+- Pipeline JSON reading is BOM-safe for Windows-generated files.
+
+## [1.9.0-alpha] - 2026-02-09
+### Added
+- Added sync cancel support in desktop app:
+- cancelable refresh path in header action
+- cancel-aware network fetch and diagnostics tracking
+- Added sync diagnostics extensions:
+- canceled outcome support
+- cancel counters
+- in-flight join tracking
+
+### Changed
+- Refresh button now doubles as cancel action during active sync.
+- Added backend storage optimization hook after heavy/full sync applies.
+
 ## [1.8.2-alpha] - 2026-02-09
 ### Added
 - Initialized Git version control for the project and published `main` to `joemoffett1/Space-Dog`.
 
 ### Changed
 - Added root `.gitignore` rules to exclude large local datasets/caches/backups from repository history.
+
+## [1.8.3-alpha] - 2026-02-09
+### Added
+- Added root `README.md` as the remote update board with:
+- short feature-added summary
+- short feature-updated summary
+- explicit user test checklist
+- full changelog mirror
+- Added explicit remaining big-task backlog to `NEXT_STEPS.md` with a fixed count for execution gating.
+
+## [1.8.4-alpha] - 2026-02-09
+### Changed
+- Consolidated the 35 remaining tasks into 6 feature groups in `NEXT_STEPS.md`.
+- Added grouped commit cadence to reduce commit volume (target: 7-12 commits for the backlog).
 
 ## [1.8.1-alpha] - 2026-02-09
 ### Changed
@@ -189,3 +302,4 @@ Versioning policy for alpha:
 - Reports
 - Settings
 - Space-themed UI baseline and project migration foundation.
+

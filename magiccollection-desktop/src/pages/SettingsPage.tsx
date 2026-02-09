@@ -1,3 +1,6 @@
+import { useEffect, useState } from 'react'
+import { getCatalogSyncStatus, getSyncDiagnostics } from '../lib/catalogSync'
+import { clearPerfMetrics, getPerfMetrics } from '../lib/perfMetrics'
 import type { Profile } from '../types'
 
 interface SettingsPageProps {
@@ -9,6 +12,50 @@ export function SettingsPage({
   activeProfile,
   onReturnToCollection,
 }: SettingsPageProps) {
+  const [syncStatusLine, setSyncStatusLine] = useState('Loading sync state...')
+  const [diagnostics, setDiagnostics] = useState(getSyncDiagnostics())
+  const [perfMetrics, setPerfMetrics] = useState(getPerfMetrics(12))
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function refresh() {
+      try {
+        const status = await getCatalogSyncStatus()
+        if (cancelled) {
+          return
+        }
+        setSyncStatusLine(
+          `Local ${status.localVersion ?? 'none'} / Latest ${status.latestVersion} / ${
+            status.canRefreshNow ? 'Refresh Available' : 'Locked'
+          }`,
+        )
+      } catch (error) {
+        if (cancelled) {
+          return
+        }
+        const message =
+          error instanceof Error ? error.message : 'Unable to read sync status.'
+        setSyncStatusLine(message)
+      } finally {
+        if (!cancelled) {
+          setDiagnostics(getSyncDiagnostics())
+          setPerfMetrics(getPerfMetrics(12))
+        }
+      }
+    }
+
+    void refresh()
+    const timer = window.setInterval(() => {
+      void refresh()
+    }, 10_000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [])
+
   return (
     <section className="panel">
       <div className="panel-head">
@@ -39,6 +86,57 @@ export function SettingsPage({
           </ul>
           <button className="button" onClick={onReturnToCollection} type="button">
             Back to Collection
+          </button>
+        </article>
+
+        <article className="report-card">
+          <h3>Sync Diagnostics</h3>
+          <p className="muted">{syncStatusLine}</p>
+          <p className="muted">Outcome: {diagnostics.lastOutcome}</p>
+          <p className="muted">
+            Last run: {diagnostics.lastRunAt ? new Date(diagnostics.lastRunAt).toLocaleString() : 'N/A'}
+          </p>
+          <p className="muted">
+            Strategy: {diagnostics.lastStrategy ?? 'N/A'}
+          </p>
+          <p className="muted">
+            Duration: {diagnostics.lastDurationMs === null ? 'N/A' : `${diagnostics.lastDurationMs}ms`}
+          </p>
+          <p className="muted">Retries: {diagnostics.retryCount}</p>
+          <p className="muted">Cancels: {diagnostics.cancelCount}</p>
+          <p className="muted">In-flight joins: {diagnostics.inFlightJoinCount}</p>
+          <p className="muted">Timeout: {diagnostics.timeoutMs}ms</p>
+          {diagnostics.lastError ? (
+            <p className="error-line">Last error: {diagnostics.lastError}</p>
+          ) : null}
+        </article>
+
+        <article className="report-card">
+          <h3>Performance Metrics</h3>
+          {perfMetrics.length === 0 ? (
+            <p className="muted">No local perf samples yet.</p>
+          ) : (
+            <ul>
+              {perfMetrics
+                .slice()
+                .reverse()
+                .map((metric) => (
+                  <li key={`${metric.key}-${metric.at}`}>
+                    <span>{metric.key}</span>
+                    <strong>{metric.valueMs.toFixed(1)}ms</strong>
+                  </li>
+                ))}
+            </ul>
+          )}
+          <button
+            className="button subtle"
+            type="button"
+            onClick={() => {
+              clearPerfMetrics()
+              setPerfMetrics(getPerfMetrics(12))
+            }}
+          >
+            Clear Perf History
           </button>
         </article>
       </div>

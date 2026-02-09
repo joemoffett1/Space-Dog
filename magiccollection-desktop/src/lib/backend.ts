@@ -10,6 +10,7 @@ import type {
   OwnedCardMap,
   PriceDirection,
   Profile,
+  UpdateOwnedCardMetadataInput,
 } from '../types'
 
 const MARKET_SNAPSHOT_KEY = 'magiccollection.market-snapshots.v1'
@@ -129,6 +130,15 @@ function normalizeCollectionCard(
     priceDelta: input.priceDelta ?? trend.priceDelta,
     priceDirection: input.priceDirection ?? trend.priceDirection,
     lastPriceAt: input.lastPriceAt ?? trend.lastPriceAt,
+    conditionCode: input.conditionCode?.trim() || 'NM',
+    language: input.language?.trim() || 'en',
+    locationName: input.locationName ?? null,
+    notes: input.notes ?? null,
+    purchasePrice:
+      typeof input.purchasePrice === 'number' && Number.isFinite(input.purchasePrice)
+        ? input.purchasePrice
+        : null,
+    dateAdded: input.dateAdded ?? null,
   }
 }
 
@@ -328,6 +338,51 @@ async function fallbackBulkUpdateTags(input: BulkTagRequest): Promise<OwnedCard[
   return fallbackGetCollection(input.profileId)
 }
 
+async function fallbackUpdateOwnedCardMetadata(
+  input: UpdateOwnedCardMetadataInput,
+): Promise<OwnedCard[]> {
+  const current = loadCollection(input.profileId)
+  const existing = current[input.scryfallId]
+  if (!existing) {
+    return fallbackGetCollection(input.profileId)
+  }
+
+  const next = normalizeCollectionCard({
+    ...existing,
+    conditionCode:
+      typeof input.conditionCode === 'string' && input.conditionCode.trim()
+        ? input.conditionCode.trim().toUpperCase()
+        : existing.conditionCode,
+    language:
+      typeof input.language === 'string' && input.language.trim()
+        ? input.language.trim().toLowerCase()
+        : existing.language,
+    locationName:
+      typeof input.locationName === 'string'
+        ? input.locationName.trim() || null
+        : existing.locationName ?? null,
+    notes:
+      typeof input.notes === 'string'
+        ? input.notes.trim() || null
+        : existing.notes ?? null,
+    purchasePrice:
+      typeof input.purchasePrice === 'number' && Number.isFinite(input.purchasePrice)
+        ? input.purchasePrice
+        : input.purchasePrice === null
+          ? null
+          : existing.purchasePrice ?? null,
+    dateAdded:
+      typeof input.dateAdded === 'string'
+        ? input.dateAdded.trim() || null
+        : existing.dateAdded ?? null,
+    updatedAt: nowIso(),
+  })
+
+  current[input.scryfallId] = next
+  saveCollection(input.profileId, current)
+  return fallbackGetCollection(input.profileId)
+}
+
 export async function listProfiles(): Promise<Profile[]> {
   if (!hasTauriRuntime()) {
     return fallbackListProfiles()
@@ -425,6 +480,15 @@ export async function bulkUpdateTags(input: BulkTagRequest): Promise<OwnedCard[]
     return fallbackBulkUpdateTags(input)
   }
   return invoke<OwnedCard[]>('bulk_update_tags', { input })
+}
+
+export async function updateOwnedCardMetadata(
+  input: UpdateOwnedCardMetadataInput,
+): Promise<OwnedCard[]> {
+  if (!hasTauriRuntime()) {
+    return fallbackUpdateOwnedCardMetadata(input)
+  }
+  return invoke<OwnedCard[]>('update_owned_card_metadata', { input })
 }
 
 export function asCardMap(cards: OwnedCard[]): OwnedCardMap {

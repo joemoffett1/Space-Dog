@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, UIEvent } from 'react'
-import type { OwnedCard, PriceDirection } from '../types'
+import type { OwnedCard, PriceDirection, UpdateOwnedCardMetadataInput } from '../types'
 
 type CollectionViewMode = 'text' | 'image' | 'compact'
 
@@ -11,6 +11,14 @@ interface CollectionPageProps {
   onDecrement: (cardId: string, foil: boolean) => Promise<void>
   onRemove: (cardId: string) => Promise<void>
   onTagCard: (cardId: string, tag: string) => Promise<void>
+  onUpdateMetadata: (
+    cardId: string,
+    metadata: Omit<UpdateOwnedCardMetadataInput, 'profileId' | 'scryfallId'>,
+  ) => Promise<void>
+  onBulkUpdateMetadata: (
+    cardIds: string[],
+    metadata: Omit<UpdateOwnedCardMetadataInput, 'profileId' | 'scryfallId'>,
+  ) => Promise<void>
   onOpenMarket: () => void
   onImportArchidektCsv: (file: File) => Promise<{
     rowsImported: number
@@ -35,6 +43,8 @@ const TEXT_ROW_HEIGHT = 46
 const COMPACT_ROW_HEIGHT = 44
 const OVERSCAN = 12
 const IMAGE_PAGE_SIZE = 140
+const CONDITION_OPTIONS = ['NM', 'LP', 'MP', 'HP', 'DMG']
+const LANGUAGE_OPTIONS = ['en', 'jp', 'de', 'fr', 'it', 'es', 'pt', 'ko', 'ru', 'zhs', 'zht']
 
 function formatUsd(value: number | null): string {
   if (value === null || !Number.isFinite(value)) {
@@ -145,6 +155,8 @@ export function CollectionPage({
   onDecrement,
   onRemove,
   onTagCard,
+  onUpdateMetadata,
+  onBulkUpdateMetadata,
   onOpenMarket,
   onImportArchidektCsv,
   isSyncing = false,
@@ -161,6 +173,18 @@ export function CollectionPage({
   const [versionError, setVersionError] = useState('')
   const [foilModeByCard, setFoilModeByCard] = useState<Record<string, boolean>>({})
   const [activeTagByCard, setActiveTagByCard] = useState<Record<string, string>>({})
+  const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(new Set())
+  const [bulkCondition, setBulkCondition] = useState('')
+  const [bulkLanguage, setBulkLanguage] = useState('')
+  const [bulkLocation, setBulkLocation] = useState('')
+  const [metadataError, setMetadataError] = useState('')
+  const [editingCardId, setEditingCardId] = useState<string | null>(null)
+  const [editCondition, setEditCondition] = useState('NM')
+  const [editLanguage, setEditLanguage] = useState('en')
+  const [editLocation, setEditLocation] = useState('')
+  const [editNotes, setEditNotes] = useState('')
+  const [editPurchasePrice, setEditPurchasePrice] = useState('')
+  const [editDateAdded, setEditDateAdded] = useState('')
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -225,6 +249,22 @@ export function CollectionPage({
     listRef.current?.scrollTo({ top: 0 })
     setImageLimit(IMAGE_PAGE_SIZE)
   }, [viewMode, searchTerm])
+
+  useEffect(() => {
+    setSelectedCardIds((previous) => {
+      if (!previous.size) {
+        return previous
+      }
+      const validIds = new Set(cards.map((card) => card.scryfallId))
+      const next = new Set<string>()
+      for (const id of previous) {
+        if (validIds.has(id)) {
+          next.add(id)
+        }
+      }
+      return next
+    })
+  }, [cards])
 
   const rowHeight = viewMode === 'compact' ? COMPACT_ROW_HEIGHT : TEXT_ROW_HEIGHT
   const totalHeight = filteredCards.length * rowHeight
@@ -314,6 +354,114 @@ export function CollectionPage({
     setVersionError('')
   }
 
+  const editingCard = useMemo(
+    () => cards.find((card) => card.scryfallId === editingCardId) ?? null,
+    [cards, editingCardId],
+  )
+
+  function toggleSelectCard(cardId: string, checked: boolean) {
+    setSelectedCardIds((previous) => {
+      const next = new Set(previous)
+      if (checked) {
+        next.add(cardId)
+      } else {
+        next.delete(cardId)
+      }
+      return next
+    })
+  }
+
+  function selectVisibleRows() {
+    setSelectedCardIds(new Set(filteredCards.map((card) => card.scryfallId)))
+  }
+
+  function clearSelectedRows() {
+    setSelectedCardIds(new Set())
+  }
+
+  async function applyBulkMetadata() {
+    const selected = [...selectedCardIds]
+    if (!selected.length) {
+      return
+    }
+
+    const payload: Omit<UpdateOwnedCardMetadataInput, 'profileId' | 'scryfallId'> = {}
+    if (bulkCondition.trim()) {
+      payload.conditionCode = bulkCondition.trim().toUpperCase()
+    }
+    if (bulkLanguage.trim()) {
+      payload.language = bulkLanguage.trim().toLowerCase()
+    }
+    if (bulkLocation.trim()) {
+      payload.locationName = bulkLocation.trim()
+    }
+
+    if (!Object.keys(payload).length) {
+      setMetadataError('Choose at least one bulk metadata field first.')
+      return
+    }
+
+    setMetadataError('')
+    try {
+      await onBulkUpdateMetadata(selected, payload)
+      setSelectedCardIds(new Set())
+    } catch (error) {
+      setMetadataError(error instanceof Error ? error.message : 'Bulk metadata update failed.')
+    }
+  }
+
+  function openMetadataEditor(card: OwnedCard) {
+    setEditingCardId(card.scryfallId)
+    setEditCondition(card.conditionCode || 'NM')
+    setEditLanguage(card.language || 'en')
+    setEditLocation(card.locationName ?? '')
+    setEditNotes(card.notes ?? '')
+    setEditPurchasePrice(
+      typeof card.purchasePrice === 'number' && Number.isFinite(card.purchasePrice)
+        ? String(card.purchasePrice)
+        : '',
+    )
+    setEditDateAdded(card.dateAdded ?? '')
+    setMetadataError('')
+  }
+
+  function closeMetadataEditor() {
+    setEditingCardId(null)
+  }
+
+  async function saveMetadataEditor() {
+    if (!editingCard) {
+      return
+    }
+
+    const payload: Omit<UpdateOwnedCardMetadataInput, 'profileId' | 'scryfallId'> = {
+      conditionCode: editCondition.trim().toUpperCase(),
+      language: editLanguage.trim().toLowerCase(),
+      locationName: editLocation.trim(),
+      notes: editNotes.trim(),
+      dateAdded: editDateAdded.trim(),
+    }
+
+    if (editPurchasePrice.trim()) {
+      const parsed = Number(editPurchasePrice.trim())
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        setMetadataError('Purchase price must be a valid positive number.')
+        return
+      }
+      payload.purchasePrice = parsed
+    } else {
+      payload.purchasePrice = null
+    }
+
+    setMetadataError('')
+    try {
+      await onUpdateMetadata(editingCard.scryfallId, payload)
+      closeMetadataEditor()
+    } catch (error) {
+      setMetadataError(error instanceof Error ? error.message : 'Failed to save metadata.')
+    }
+  }
+
   return (
     <section className="panel collection-panel">
       <div className="panel-head">
@@ -347,8 +495,52 @@ export function CollectionPage({
         <input className="collection-search" type="search" placeholder="Search cards, set, number, or tags" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} />
       </div>
 
+      <div className="bulk-tag-toolbar">
+        <span className="muted small">Selected {selectedCardIds.size}</span>
+        <button className="button tiny subtle" type="button" onClick={selectVisibleRows}>
+          Select Visible
+        </button>
+        <button className="button tiny subtle" type="button" onClick={clearSelectedRows}>
+          Clear
+        </button>
+        <select
+          className="tag-select"
+          value={bulkCondition}
+          onChange={(event) => setBulkCondition(event.target.value)}
+        >
+          <option value="">Condition</option>
+          {CONDITION_OPTIONS.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+        <select
+          className="tag-select"
+          value={bulkLanguage}
+          onChange={(event) => setBulkLanguage(event.target.value)}
+        >
+          <option value="">Language</option>
+          {LANGUAGE_OPTIONS.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+        <input
+          className="tag-input"
+          value={bulkLocation}
+          onChange={(event) => setBulkLocation(event.target.value)}
+          placeholder="Location"
+        />
+        <button className="button tiny" type="button" onClick={() => void applyBulkMetadata()}>
+          Apply Metadata
+        </button>
+      </div>
+
       {importMessage ? <p className="muted">{importMessage}</p> : null}
       {importError ? <p className="error-line">{importError}</p> : null}
+      {metadataError ? <p className="error-line">{metadataError}</p> : null}
 
       <div className="stat-strip">
         <article className="stat-chip"><h3>Unique Cards</h3><strong>{uniqueCards}</strong></article>
@@ -374,6 +566,7 @@ export function CollectionPage({
                   const imageSrc = card.imageUrl ?? fallbackScryfallImageUrl(card.scryfallId)
                   const foilMode = !!foilModeByCard[card.scryfallId]
                   const activeTag = activeTagByCard[card.scryfallId]
+                  const isSelected = selectedCardIds.has(card.scryfallId)
 
                   return (
                     <article key={card.scryfallId} className="collection-image-card">
@@ -391,8 +584,20 @@ export function CollectionPage({
                       </button>
 
                       <div className="market-card-body">
+                        <label className="select-row">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(event) => toggleSelectCard(card.scryfallId, event.target.checked)}
+                          />
+                          <span className="muted small">Select</span>
+                        </label>
                         <button className="linkish-title" type="button" onClick={() => void handleOpenVersions(card)}>{card.name}</button>
                         <p className="muted small">{card.setCode.toUpperCase()} #{card.collectorNumber} · versions owned {versions}</p>
+                        <p className="muted small">
+                          {card.conditionCode}/{card.language.toUpperCase()}
+                          {card.locationName ? ` · ${card.locationName}` : ''}
+                        </p>
 
                         <div className="price-line">
                           <span className="price-current">{formatUsd(card.currentPrice)}</span>
@@ -414,6 +619,9 @@ export function CollectionPage({
 
                         <div className="row-actions">
                           <span className="muted small">Qty {total}</span>
+                          <button className="button tiny subtle" type="button" onClick={() => openMetadataEditor(card)}>
+                            Edit
+                          </button>
                           <button
                             className={`foil-check ${foilMode ? 'active' : ''}`}
                             type="button"
@@ -454,10 +662,20 @@ export function CollectionPage({
                 {visibleRows.map((card) => {
                   const total = card.quantity + card.foilQuantity
                   const versions = versionCountsByName.get(normalize(card.name)) ?? 1
+                  const isSelected = selectedCardIds.has(card.scryfallId)
 
                   return (
                     <div key={card.scryfallId} className={`collection-row ${viewMode === 'compact' ? 'compact' : ''}`}>
-                      <button className="linkish-title" type="button" onClick={() => void handleOpenVersions(card)}>{card.name}</button>
+                      <div className="card-cell-wrap">
+                        <label className="select-row">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(event) => toggleSelectCard(card.scryfallId, event.target.checked)}
+                          />
+                        </label>
+                        <button className="linkish-title" type="button" onClick={() => void handleOpenVersions(card)}>{card.name}</button>
+                      </div>
                       {viewMode === 'text' ? (
                         <>
                           <span>{card.setCode.toUpperCase()}</span>
@@ -474,6 +692,7 @@ export function CollectionPage({
                         <button className="button tiny subtle" onClick={() => void onIncrement(card.scryfallId, true)} type="button">+F</button>
                         <button className="button tiny subtle" onClick={() => void onDecrement(card.scryfallId, false)} type="button">-N</button>
                         <button className="button tiny subtle" onClick={() => void onDecrement(card.scryfallId, true)} type="button">-F</button>
+                        <button className="button tiny subtle" onClick={() => openMetadataEditor(card)} type="button">Edit</button>
                         <button className="button tiny danger" onClick={() => void onRemove(card.scryfallId)} type="button">Remove</button>
                       </div>
                     </div>
@@ -485,6 +704,55 @@ export function CollectionPage({
           )}
         </>
       )}
+
+      {editingCard ? (
+        <section className="version-panel">
+          <div className="version-head">
+            <div>
+              <h3>Edit Metadata: {editingCard.name}</h3>
+              <p className="muted small">Update condition, language, location, notes, and purchase details.</p>
+            </div>
+            <button className="button subtle tiny" type="button" onClick={closeMetadataEditor}>
+              Close
+            </button>
+          </div>
+
+          <div className="bulk-tag-toolbar">
+            <select className="tag-select" value={editCondition} onChange={(event) => setEditCondition(event.target.value)}>
+              {CONDITION_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+            <select className="tag-select" value={editLanguage} onChange={(event) => setEditLanguage(event.target.value)}>
+              {LANGUAGE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+            <input className="tag-input" value={editLocation} onChange={(event) => setEditLocation(event.target.value)} placeholder="Location" />
+            <input className="tag-input" value={editPurchasePrice} onChange={(event) => setEditPurchasePrice(event.target.value)} placeholder="Purchase Price" />
+            <input className="tag-input" value={editDateAdded} onChange={(event) => setEditDateAdded(event.target.value)} placeholder="Date Added (YYYY-MM-DD)" />
+          </div>
+          <textarea
+            className="collection-search"
+            value={editNotes}
+            onChange={(event) => setEditNotes(event.target.value)}
+            placeholder="Notes"
+            rows={3}
+          />
+          <div className="row-actions">
+            <button className="button tiny" type="button" onClick={() => void saveMetadataEditor()}>
+              Save Metadata
+            </button>
+            <button className="button tiny subtle" type="button" onClick={closeMetadataEditor}>
+              Cancel
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       {versionAnchor ? (
         <section className="version-panel">

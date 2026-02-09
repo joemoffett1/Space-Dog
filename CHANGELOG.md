@@ -8,6 +8,82 @@ Versioning policy for alpha:
 - Increment `patch` (`x` in `1.0.x-alpha`) for updates/fixes to existing features.
 - Use engineering discretion on feature vs update.
 
+## [1.14.0-alpha] - 2026-02-09
+### Added
+- Added cross-platform handoff scaffolding docs:
+- `shared-core/README.md`
+- `web-client/README.md`
+- Added desktop drag/drop and paste handoff support for Scryfall URLs into Market search.
+
+### Notes
+- Auth strategy and mobile local-store architecture remain open decisions.
+
+## [1.13.0-alpha] - 2026-02-09
+### Added
+- Added CK adapter scaffold in `src/lib/ckAdapter.ts` with feature flags:
+- `VITE_ENABLE_CK`
+- optional `VITE_CK_PROXY_URL`
+- Added CK buylist analytics and sell-intent flow to Reports:
+- cash/credit payout metrics
+- coverage percentage
+- top quote list
+- sell-intent link launch
+
+### Notes
+- Live CK integration requires a configured proxy/API endpoint; fallback mock mode is active by default.
+
+## [1.12.0-alpha] - 2026-02-09
+### Added
+- Added per-card metadata editing (condition, language, location, notes, purchase price, date added).
+- Added bulk metadata operations for selected cards in Collection view.
+- Added local performance metric recorder (`tab:<name>` timings) and Settings diagnostics display.
+- Added backend/frontend metadata fields parity for owned cards.
+
+### Changed
+- Collection rows and image cards now include metadata-driven edit actions.
+
+## [1.11.0-alpha] - 2026-02-09
+### Added
+- Added Market keyboard actions:
+- `Enter` opens detail drawer
+- `+` adds nonfoil
+- `F` adds foil
+- Added query validation warnings and saved-query UX refinements.
+
+### Changed
+- Market card interactions are now keyboard-first and focusable.
+
+## [1.10.0-alpha] - 2026-02-09
+### Added
+- Added production-shaped sync pipeline scaffold in `sync-service/`:
+- daily build command (`build-daily`)
+- snapshot normalization
+- incremental patch generation
+- compacted patch generation
+- manifest generation from version index
+- Added local sync API hardening:
+- `/health` and `/metrics`
+- strategy-aware `/sync/status`
+- `/sync/patch` and `/sync/snapshot` improvements
+- per-IP rate limiting
+
+### Changed
+- Pipeline JSON reading is BOM-safe for Windows-generated files.
+
+## [1.9.0-alpha] - 2026-02-09
+### Added
+- Added sync cancel support in desktop app:
+- cancelable refresh path in header action
+- cancel-aware network fetch and diagnostics tracking
+- Added sync diagnostics extensions:
+- canceled outcome support
+- cancel counters
+- in-flight join tracking
+
+### Changed
+- Refresh button now doubles as cancel action during active sync.
+- Added backend storage optimization hook after heavy/full sync applies.
+
 ## [1.8.2-alpha] - 2026-02-09
 ### Added
 - Initialized Git version control for the project and published `main` to `joemoffett1/Space-Dog`.
