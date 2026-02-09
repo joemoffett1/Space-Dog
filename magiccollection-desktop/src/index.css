@@ -1,0 +1,67 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Sora:wght@400;500;700&display=swap');
+
+:root {
+  --bg-0: #030716;
+  --bg-1: #090f2f;
+  --bg-2: #1b1140;
+  --ink: #e9efff;
+  --ink-soft: #9fb0dd;
+  --panel: rgba(13, 21, 58, 0.78);
+  --panel-border: rgba(119, 150, 255, 0.34);
+  --accent: #ff6e2e;
+  --accent-strong: #ff3f10;
+  --accent-soft: rgba(130, 156, 255, 0.2);
+  --danger: #ff597a;
+  --foil: #ffca63;
+  --nebula-a: rgba(113, 60, 255, 0.24);
+  --nebula-b: rgba(40, 210, 255, 0.14);
+  --shadow: rgba(1, 5, 20, 0.55);
+
+  font-family: 'Sora', sans-serif;
+  line-height: 1.4;
+  font-weight: 400;
+  color: var(--ink);
+  color-scheme: dark;
+  background:
+    radial-gradient(circle at 18% 18%, var(--nebula-a) 0%, transparent 35%),
+    radial-gradient(circle at 82% 16%, var(--nebula-b) 0%, transparent 32%),
+    linear-gradient(150deg, var(--bg-0), var(--bg-1) 48%, var(--bg-2));
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  min-width: 320px;
+  background:
+    radial-gradient(circle at 18% 18%, var(--nebula-a) 0%, transparent 35%),
+    radial-gradient(circle at 82% 16%, var(--nebula-b) 0%, transparent 32%),
+    linear-gradient(150deg, var(--bg-0), var(--bg-1) 48%, var(--bg-2));
+}
+
+h1,
+h2,
+h3 {
+  font-family: 'Orbitron', sans-serif;
+  margin: 0;
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+}
+
+p {
+  margin: 0;
+}

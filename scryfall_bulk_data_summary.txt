@@ -1,0 +1,26 @@
+﻿Scryfall bulk-data summary (fetched February 9, 2026)
+
+Top-level fields:
+- object
+- has_more
+- data
+
+Fields in each data[] entry:
+- id
+- object
+- type
+- name
+- description
+- download_uri
+- updated_at
+- size
+- content_type
+- content_encoding
+- uri
+
+Current dataset type values:
+- oracle_cards
+- unique_artwork
+- default_cards
+- all_cards
+- rulings

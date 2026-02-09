@@ -1,0 +1,36 @@
+﻿{
+  "latestVersion": "v260209",
+  "latestSnapshot": "versions/v260209.snapshot.json",
+  "syncPolicy": {
+    "compactedThresholdMissed": 5,
+    "forceFullThresholdMissed": 21,
+    "compactedRetentionDays": 21,
+    "expectedPublishTimeUtc": "22:30",
+    "refreshUnlockLagMinutes": 60
+  },
+  "versions": [
+    {
+      "version": "v250204",
+      "snapshot": "versions/v250204.snapshot.json",
+      "createdAt": "2025-02-04T10:08:10Z"
+    },
+    {
+      "version": "v260208",
+      "patchFromPrevious": "versions/v260208.patch.json",
+      "createdAt": "2026-02-08T23:50:00Z"
+    },
+    {
+      "version": "v260209",
+      "patchFromPrevious": "versions/v260209.patch.json",
+      "createdAt": "2026-02-09T23:50:00Z"
+    }
+  ],
+  "compactedPatches": [
+    {
+      "fromVersion": "v250204",
+      "toVersion": "v260209",
+      "path": "versions/v260209.compacted.from-v250204.json",
+      "createdAt": "2026-02-09T23:50:00Z"
+    }
+  ]
+}

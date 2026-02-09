@@ -1,0 +1,42 @@
+# Local backups
+/Backup/
+
+# OS/editor artifacts
+*.Zone.Identifier
+*Zone.Identifier
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Python cache artifacts
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# Node/Rust build artifacts
+**/node_modules/
+**/dist/
+**/dist-ssr/
+**/target/
+magiccollection-desktop/tools/node/
+magiccollection-desktop/tools/node-portable.zip
+
+# Desktop runtime logs and local DBs
+magiccollection-desktop/logs/
+*.db
+*.sqlite
+*.sqlite3
+
+# Large local datasets/exports at project root (kept out of git)
+/*.csv
+/archidekt_payload.json
+/ck_pricelist.json
+/scryfall_cache.json
+/scryfall_prices_by_name.json
+/tcgtrack.json
+/tcgtracker.dat
+/tcglow_reference.txt
+/tcgtracking_*

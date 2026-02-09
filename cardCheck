@@ -1,0 +1,339 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+import sys
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+
+ANSI_RESET = "\033[0m"
+ANSI_BOLD = "\033[1m"
+ANSI_WHITE = "\033[97m"
+ANSI_BLUE = "\033[38;5;39m"
+ANSI_CYAN = "\033[36m"
+ANSI_YELLOW = "\033[33m"
+ANSI_LIGHT_PINK = "\033[38;5;213m"
+ANSI_GREEN = "\033[32m"
+ANSI_GRAY = "\033[90m"
+ANSI_GOLD = "\033[38;5;220m"
+
+
+def should_color_output() -> bool:
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    if os.environ.get("NO_COLOR"):
+        return False
+    return sys.stdout.isatty()
+
+
+def colorize(s: str, code: str, enabled: bool) -> str:
+    return f"{code}{s}{ANSI_RESET}" if enabled else s
+
+
+def dmoney(x) -> Decimal:
+    try:
+        return Decimal(str(x)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError):
+        return Decimal("0.00")
+
+
+def fmt_money(v: Decimal, use_color: bool) -> str:
+    if v <= 0:
+        return colorize("-", ANSI_WHITE, use_color)
+    txt = f"${v:.2f}"
+    code = ANSI_BOLD + ANSI_GREEN if v >= Decimal("5.00") else ANSI_GREEN
+    return colorize(txt, code, use_color)
+
+
+def format_version_value(v: str, use_color: bool) -> str:
+    if v.endswith(" - F"):
+        base = v[:-4]
+        return (
+            f"{colorize(base, ANSI_LIGHT_PINK, use_color)} "
+            f"{colorize('-', ANSI_WHITE, use_color)} "
+            f"{colorize('F', ANSI_BOLD + ANSI_GOLD, use_color)}"
+        )
+    return colorize(v, ANSI_LIGHT_PINK, use_color)
+
+
+def fmt_compact_num(v: Decimal) -> str:
+    if v <= 0:
+        return "-"
+    s = f"{v:.2f}"
+    if s.startswith("0"):
+        s = s[1:]
+    return s
+
+
+def fmt_condition_cell(d: dict) -> str:
+    if not d:
+        return "-"
+    low = dmoney(d.get("low"))
+    mkt = dmoney(d.get("market"))
+    hi = dmoney(d.get("high"))
+    cnt = int(d.get("count") or 0)
+    if low <= 0 and mkt <= 0 and hi <= 0 and cnt <= 0:
+        return "-"
+    return f"l={fmt_compact_num(low)} m={fmt_compact_num(mkt)} h={fmt_compact_num(hi)} c={cnt}"
+
+
+def version_from_entry(e: dict) -> str:
+    set_code = str(e.get("set") or "").strip().upper()
+    collector = str(e.get("collector_number") or "").strip()
+    if set_code and collector:
+        return f"{set_code} #{collector}"
+    if set_code:
+        return set_code
+    return str(e.get("set_name") or "-").strip() or "-"
+
+
+def nm_low_from_conditions(e: dict, variant: str) -> Decimal:
+    conditions = e.get("conditions", {}) or {}
+    by_var = conditions.get(variant, {}) or {}
+    nm = by_var.get("NM", {}) or {}
+    # Require at least 2 NM listings to reduce one-off/suspicious lows.
+    if int(nm.get("count") or 0) < 2:
+        return Decimal("0.00")
+    return dmoney(nm.get("low"))
+
+
+def nm_count_from_conditions(e: dict, variant: str) -> int:
+    conditions = e.get("conditions", {}) or {}
+    by_var = conditions.get(variant, {}) or {}
+    nm = by_var.get("NM", {}) or {}
+    try:
+        return int(nm.get("count") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def conservative_nm_qty(e: dict, variant: str) -> int:
+    sku_qty = nm_count_from_conditions(e, variant)
+    try:
+        pricing_qty = int(e.get("tcg_nm_qty") or 0)
+    except (TypeError, ValueError):
+        pricing_qty = 0
+    if pricing_qty > 0:
+        return min(sku_qty, pricing_qty)
+    return sku_qty
+
+
+def build_rows(sid_prices: dict, name_filter: str | None):
+    rows = []
+    nf = (name_filter or "").casefold()
+    for sid, e in sid_prices.items():
+        name = str(e.get("name") or sid or "-").strip() or "-"
+        if nf and nf not in name.casefold():
+            continue
+        rows.append(
+            {
+                "name": name,
+                "version": version_from_entry(e),
+                "tcg_market": dmoney(e.get("tcg_market")),
+                "tcg_market_foil": dmoney(e.get("tcg_market_foil")),
+                # Use pricing endpoint-derived lows from cache.
+                "tcg_low_nm": dmoney(e.get("tcg_low")),
+                "tcg_low_foil": dmoney(e.get("tcg_low_foil")),
+                # Use conservative listing qty for filters: min(sku NM count, pricing qty).
+                "tcg_nm_qty": conservative_nm_qty(e, "N"),
+                "tcg_nm_qty_foil": conservative_nm_qty(e, "F"),
+                "conditions": e.get("conditions", {}) or {},
+            }
+        )
+    return rows
+
+
+def sort_rows(rows: list[dict], sort_key: str, asc: bool):
+    key_map = {
+        "name": lambda r: (r["name"], r["version"]),
+        "version": lambda r: (r["version"], r["name"]),
+        "market": lambda r: (r["tcg_market"], r["name"]),
+        "marketfoil": lambda r: (r["tcg_market_foil"], r["name"]),
+        "low": lambda r: (r["tcg_low_nm"], r["name"]),
+    }
+    rows.sort(key=key_map[sort_key], reverse=not asc)
+
+
+def print_version_low_table(rows: list[dict], use_color: bool):
+    # Track name uniqueness by version across the full row set, not just emitted lows.
+    # This prevents collisions (e.g., same set+# shared by different names) from leaking through.
+    version_names: dict[str, set[str]] = {}
+    for r in rows:
+        name = r.get("name", "-")
+        v = r.get("version", "-")
+        version_names.setdefault(v, set()).add(name)
+        version_names.setdefault(f"{v} - F", set()).add(name)
+
+    emitted = []
+    for r in rows:
+        name = r.get("name", "-")
+        v = r.get("version", "-")
+        low = r.get("tcg_low_nm", Decimal("0.00"))
+        mkt = r.get("tcg_market", Decimal("0.00"))
+        low_foil = r.get("tcg_low_foil", Decimal("0.00"))
+        mkt_foil = r.get("tcg_market_foil", Decimal("0.00"))
+        nm_qty = int(r.get("tcg_nm_qty", 0) or 0)
+        nm_qty_foil = int(r.get("tcg_nm_qty_foil", 0) or 0)
+        if low > 0:
+            eff_low = low + Decimal("1.30") if low < Decimal("5.00") else low
+            emitted.append((name, v, eff_low, mkt, nm_qty))
+        if low_foil > 0:
+            eff_low_foil = low_foil + Decimal("1.30") if low_foil < Decimal("5.00") else low_foil
+            emitted.append((name, f"{v} - F", eff_low_foil, mkt_foil, nm_qty_foil))
+
+    out = []
+    for name, v, low, mkt, nm_qty in emitted:
+        # Exclude ambiguous versions shared by multiple card names.
+        if len(version_names.get(v, set())) != 1:
+            continue
+        out.append((name, v, low, mkt, nm_qty))
+
+    out.sort(key=lambda x: (x[0], x[1], x[2], x[3], x[4]))
+    w_name = max(len("Card"), *(len(name) for name, _, _, _, _ in out)) if out else len("Card")
+    w_ver = max(len("Version"), *(len(v) for _, v, _, _, _ in out)) if out else len("Version")
+    w_mkt = max(len("TCG Market"), *(len(f"${mkt:.2f}") for _, _, _, mkt, _ in out if mkt > 0), 1) if out else len("TCG Market")
+    w_low = max(len("TCG Low (NM)"), *(len(f"${low:.2f}") for _, _, low, _, _ in out)) if out else len("TCG Low (NM)")
+    w_nmq = max(len("TCG NM Qty"), *(len(str(nmq)) for _, _, _, _, nmq in out)) if out else len("TCG NM Qty")
+    table_w = w_name + w_ver + w_mkt + w_low + w_nmq + 12
+    print(colorize("Card Check".center(table_w), ANSI_BOLD + ANSI_YELLOW, use_color))
+    h_name = colorize("Card", ANSI_BOLD + ANSI_BLUE, use_color) + (" " * (w_name - len("Card")))
+    h_ver = colorize("Version", ANSI_BOLD + ANSI_BLUE, use_color) + (" " * (w_ver - len("Version")))
+    h_mkt = colorize("TCG Market", ANSI_BOLD + ANSI_BLUE, use_color) + (" " * (w_mkt - len("TCG Market")))
+    h_low = colorize("TCG Low (NM)", ANSI_BOLD + ANSI_BLUE, use_color) + (" " * (w_low - len("TCG Low (NM)")))
+    h_nmq = colorize("TCG NM Qty", ANSI_BOLD + ANSI_BLUE, use_color) + (" " * (w_nmq - len("TCG NM Qty")))
+    print(" | ".join([h_name, h_ver, h_mkt, h_low, h_nmq]))
+    print(colorize("-+-".join(["-" * w_name, "-" * w_ver, "-" * w_mkt, "-" * w_low, "-" * w_nmq]), ANSI_WHITE, use_color))
+    for name, v, low, mkt, nm_qty in out:
+        name_s = colorize(name, ANSI_BOLD + ANSI_CYAN, use_color) + (" " * (w_name - len(name)))
+        ver_s = format_version_value(v, use_color) + (" " * (w_ver - len(v)))
+        mkt_txt = f"${mkt:.2f}" if mkt > 0 else "-"
+        mkt_s = fmt_money(mkt, use_color) + (" " * (w_mkt - len(mkt_txt)))
+        low_txt = f"${low:.2f}"
+        low_s = fmt_money(low, use_color) + (" " * (w_low - len(low_txt)))
+        nmq_s = colorize(str(nm_qty), ANSI_BOLD + ANSI_WHITE, use_color) + (" " * (w_nmq - len(str(nm_qty))))
+        print(" | ".join([name_s, ver_s, mkt_s, low_s, nmq_s]))
+    print()
+    print(
+        f"{colorize('Rows', ANSI_BOLD + ANSI_CYAN, use_color)} "
+        f"{colorize(str(len(out)), ANSI_BOLD + ANSI_WHITE, use_color)}"
+    )
+
+
+def print_table(rows: list[dict], use_color: bool, all_conditions: bool):
+    w_card = len("Card")
+    w_ver = len("Version")
+    w_market = len("TCG Market")
+    w_market_foil = len("TCG Market Foil")
+    w_low = len("TCG Low (NM)")
+    condition_cols = []
+    cond_widths: dict[str, int] = {}
+
+    flat_rows = []
+    for r in rows:
+        card = r["name"]
+        ver = r["version"]
+        m = "-" if r["tcg_market"] <= 0 else f"${r['tcg_market']:.2f}"
+        mf = "-" if r["tcg_market_foil"] <= 0 else f"${r['tcg_market_foil']:.2f}"
+        l = "-" if r["tcg_low_nm"] <= 0 else f"${r['tcg_low_nm']:.2f}"
+        flat_rows.append((card, ver, m, mf, l))
+        w_card = max(w_card, len(card))
+        w_ver = max(w_ver, len(ver))
+        w_market = max(w_market, len(m))
+        w_market_foil = max(w_market_foil, len(mf))
+        w_low = max(w_low, len(l))
+        for var, cnd_map in (r.get("conditions") or {}).items():
+            for cnd in (cnd_map or {}).keys():
+                key = f"{str(var).upper()}/{str(cnd).upper()}"
+                if key not in cond_widths:
+                    cond_widths[key] = len(key)
+                cell = fmt_condition_cell((cnd_map or {}).get(cnd) or {})
+                cond_widths[key] = max(cond_widths[key], len(cell))
+
+    if all_conditions:
+        default_order = ["N/NM", "N/LP", "N/MP", "N/HP", "N/DMG", "F/NM", "F/LP", "F/MP", "F/HP", "F/DMG", "E/NM", "E/LP", "E/MP", "E/HP", "E/DMG"]
+        condition_cols = [k for k in default_order if k in cond_widths]
+        for k in sorted(cond_widths.keys()):
+            if k not in condition_cols:
+                condition_cols.append(k)
+    else:
+        default_cols = ["N/NM", "N/LP", "F/NM", "F/LP"]
+        condition_cols = [k for k in default_cols if k in cond_widths]
+
+    table_w = w_card + w_ver + w_market + w_market_foil + w_low + 12
+    if condition_cols:
+        table_w += sum(cond_widths[c] for c in condition_cols) + (3 * len(condition_cols))
+    print(colorize("Card Check".center(table_w), ANSI_BOLD + ANSI_YELLOW, use_color))
+
+    h_card = colorize("Card", ANSI_BOLD + ANSI_BLUE, use_color) + " " * (w_card - len("Card"))
+    h_ver = colorize("Version", ANSI_BOLD + ANSI_BLUE, use_color) + " " * (w_ver - len("Version"))
+    h_market = colorize("TCG Market", ANSI_BOLD + ANSI_BLUE, use_color) + " " * (w_market - len("TCG Market"))
+    h_market_foil = colorize("TCG Market Foil", ANSI_BOLD + ANSI_BLUE, use_color) + " " * (w_market_foil - len("TCG Market Foil"))
+    h_low = colorize("TCG Low (NM)", ANSI_BOLD + ANSI_BLUE, use_color) + " " * (w_low - len("TCG Low (NM)"))
+    header_parts = [h_card, h_ver, h_market, h_market_foil, h_low]
+    sep_parts = ["-" * w_card, "-" * w_ver, "-" * w_market, "-" * w_market_foil, "-" * w_low]
+    for c in condition_cols:
+        header_parts.append(colorize(c, ANSI_BOLD + ANSI_BLUE, use_color) + (" " * (cond_widths[c] - len(c))))
+        sep_parts.append("-" * cond_widths[c])
+    print(" | ".join(header_parts))
+    print(colorize("-+-".join(sep_parts), ANSI_WHITE, use_color))
+
+    for i, r in enumerate(rows):
+        card, ver, m, mf, l = flat_rows[i]
+        card_s = colorize(card, ANSI_BOLD + ANSI_CYAN, use_color) + " " * (w_card - len(card))
+        ver_s = colorize(ver, ANSI_LIGHT_PINK, use_color) + " " * (w_ver - len(ver))
+        m_s = fmt_money(r["tcg_market"], use_color) + " " * (w_market - len(m))
+        mf_s = fmt_money(r["tcg_market_foil"], use_color) + " " * (w_market_foil - len(mf))
+        l_s = fmt_money(r["tcg_low_nm"], use_color) + " " * (w_low - len(l))
+        row_parts = [card_s, ver_s, m_s, mf_s, l_s]
+        conditions = r.get("conditions", {}) or {}
+        for c in condition_cols:
+            var, cnd = c.split("/", 1)
+            cell = fmt_condition_cell((conditions.get(var) or {}).get(cnd) or {})
+            row_parts.append(colorize(cell, ANSI_WHITE, use_color) + (" " * (cond_widths[c] - len(cell))))
+        print(" | ".join(row_parts))
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(
+        prog="cardCheck",
+        description="Print a colorized table from tcgtracker.dat (EN-only NM-default TCG values).",
+    )
+    ap.add_argument("--data", default="tcgtracker.dat", help="Input data file (default: tcgtracker.dat)")
+    ap.add_argument("--name", help="Filter by card name substring")
+    ap.add_argument("--sort", choices=["name", "version", "market", "marketfoil", "low"], default="market", help="Sort key")
+    ap.add_argument("--asc", action="store_true", help="Sort ascending")
+    ap.add_argument("--limit", type=int, default=100, help="Max top rows to print (default: 100)")
+    ap.add_argument("-ac", "--all-conditions", action="store_true", help="Show all condition columns (default shows N/F NM+LP only)")
+    ap.add_argument("--version-low-only", action="store_true", help="Output only Version and TCG Low (NM); excludes non-unique versions")
+    args = ap.parse_args()
+
+    if not os.path.exists(args.data):
+        print(f"ERROR: missing data file: {args.data}", file=sys.stderr)
+        return 2
+
+    with open(args.data, "r", encoding="utf-8") as f:
+        obj = json.load(f)
+    sid_prices = (obj or {}).get("sid_prices", {})
+    if not isinstance(sid_prices, dict):
+        print("ERROR: invalid data format (missing sid_prices dict)", file=sys.stderr)
+        return 2
+
+    rows = build_rows(sid_prices, args.name)
+    sort_rows(rows, args.sort, args.asc)
+    if args.limit and args.limit > 0:
+        rows = rows[: args.limit]
+
+    use_color = should_color_output()
+    if args.version_low_only:
+        print_version_low_table(rows, use_color)
+    else:
+        print_table(rows, use_color, all_conditions=args.all_conditions)
+        print()
+        print(
+            f"{colorize('Rows', ANSI_BOLD + ANSI_CYAN, use_color)} "
+            f"{colorize(str(len(rows)), ANSI_BOLD + ANSI_WHITE, use_color)}"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

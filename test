@@ -1,0 +1,20 @@
+{
+  "set_id": 1,
+  "updated": "2026-01-29T11:50:40-05:00",
+  "sku_count": 900,           // Total SKUs in this set
+  "product_count": 9,        // Products with SKU data
+  "products": {
+    "15038": {                // Keyed by product ID
+      "4639": {               // Keyed by TCGPlayer SKU ID
+        "cnd": "NM",          // Condition: NM/LP/MP/HP/DMG
+        "var": "N",           // Variant: N=Normal, F=Foil
+        "lng": "EN",          // Language: EN/JP/FR/DE/IT/ES/PT/RU/KO/CS/CT
+        "mkt": 0.34,          // TCGPlayer market price
+        "low": 0.25,          // Lowest listing price
+        "hi": 0.50,           // Highest listing price
+        "cnt": 8              // Number of active listings
+      },
+      "4641": { "cnd": "NM", "var": "F", "lng": "EN", "mkt": 4.54, ... }
+    }
+  }
+}

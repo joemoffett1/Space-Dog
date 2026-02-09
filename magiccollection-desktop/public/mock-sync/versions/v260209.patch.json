@@ -1,0 +1,28 @@
+﻿{
+  "fromVersion": "v260208",
+  "toVersion": "v260209",
+  "added": [],
+  "updated": [
+    {
+      "scryfallId": "f6f9ad63-8651-4dc8-9e73-c16c2c3d4c08",
+      "name": "Rogues' Passage",
+      "setCode": "m21",
+      "collectorNumber": "246",
+      "imageUrl": "https://cards.scryfall.io/normal/front/f/6/f6f9ad63-8651-4dc8-9e73-c16c2c3d4c08.jpg",
+      "marketPrice": 0.28,
+      "updatedAt": "2026-02-09T23:50:00Z"
+    },
+    {
+      "scryfallId": "5d8f4f6f-171f-4f4f-bf15-a81dd3bd89fe",
+      "name": "Beast Within",
+      "setCode": "cmm",
+      "collectorNumber": "286",
+      "imageUrl": "https://cards.scryfall.io/normal/front/5/d/5d8f4f6f-171f-4f4f-bf15-a81dd3bd89fe.jpg",
+      "marketPrice": 2.04,
+      "updatedAt": "2026-02-09T23:50:00Z"
+    }
+  ],
+  "removed": [
+    "2ea2f9d0-d727-44f1-b94c-0ca39d42d4d4"
+  ]
+}
