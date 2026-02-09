@@ -8,6 +8,21 @@ Versioning policy for alpha:
 - Increment `patch` (`x` in `1.0.x-alpha`) for updates/fixes to existing features.
 - Use engineering discretion on feature vs update.
 
+## [1.16.2-alpha] - 2026-02-09
+### Added
+- Added root `ARCHITECTURE.md` covering:
+- full stack layers
+- local-first deployment model
+- dependency inventory
+- core runtime data flows
+
+### Changed
+- Rewrote `NEXT_STEPS.md` to prioritize desktop prototype quality and local sync workflow before cloud deployment.
+- Added targeted code comments in complex paths:
+- undo snapshot/restore flow in `App.tsx`
+- sync single-flight/runtime strategy in `catalogSync.ts`
+- restore + CK quote logic in `src-tauri/src/lib.rs`
+
 ## [1.16.1-alpha] - 2026-02-09
 ### Changed
 - Local auth entry flow is now login-first with explicit `Login` / `Create Account` mode switch.

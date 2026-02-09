@@ -7,21 +7,16 @@ Last updated: 2026-02-09
 Current stage: `1.x.x-alpha`
 
 ## Features Added (This Run)
-- Added offline-first local account auth gate before collection profile access (`create account`, `sign in`, `sign out`).
-- Added local account sync-state visibility in Settings (`Pending` / `Synced` + last synced timestamp).
-- Added direct Card Kingdom public buylist integration in Tauri backend (`get_ck_buylist_quotes`) with 12-hour local cache.
-- Added Cloudflare Worker + R2 deployment scaffold for sync service under `sync-service/cloudflare`.
-- Added collection action-history undo flow with per-card restore snapshots and backend state-restore command.
+- Added `ARCHITECTURE.md` with full stack design, dependency inventory, and runtime data flows.
+- Rewrote `NEXT_STEPS.md` for desktop-prototype-first priorities with local-only sync focus.
 
 ## Features Updated (This Run)
-- Updated Reports CK provider flow to include `public` provider mode.
-- Updated collection mutation handlers to record undo history for quantity/remove/tag/metadata edits.
-- Updated sync-service docs to include Cloudflare hosting path alongside local Python server.
-- Updated auth gate UX to default to Login first, with Create Account behind an explicit tab switch.
+- Added targeted code comments in complex paths (`App.tsx`, `catalogSync.ts`, `src-tauri/src/lib.rs`) to improve maintainability.
+- Kept prior auth/undo/CK features intact and validated with lint/build/check.
 
 ## Blockers (Logged And Bypassed)
-- Group B blocker: production Cloudflare account/bucket/deploy credentials are not configured yet.
 - Group F blocker: cloud account server and mobile-store design are still pending.
+- Cloudflare deployment is intentionally deferred until desktop prototype sign-off.
 
 ## Things You Need To Test
 - Local auth flow:
@@ -55,6 +50,21 @@ Versioning policy for alpha:
 - Increment `minor` (`x` in `1.x.0-alpha`) for new features.
 - Increment `patch` (`x` in `1.0.x-alpha`) for updates/fixes to existing features.
 - Use engineering discretion on feature vs update.
+
+## [1.16.2-alpha] - 2026-02-09
+### Added
+- Added root `ARCHITECTURE.md` covering:
+- full stack layers
+- local-first deployment model
+- dependency inventory
+- core runtime data flows
+
+### Changed
+- Rewrote `NEXT_STEPS.md` to prioritize desktop prototype quality and local sync workflow before cloud deployment.
+- Added targeted code comments in complex paths:
+- undo snapshot/restore flow in `App.tsx`
+- sync single-flight/runtime strategy in `catalogSync.ts`
+- restore + CK quote logic in `src-tauri/src/lib.rs`
 
 ## [1.16.1-alpha] - 2026-02-09
 ### Changed

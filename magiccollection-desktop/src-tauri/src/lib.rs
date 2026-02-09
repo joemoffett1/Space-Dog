@@ -1460,6 +1460,7 @@ fn set_owned_card_state(
 
   let quantity = input.card.quantity.max(0);
   let foil_quantity = input.card.foil_quantity.max(0);
+  // Undo pipeline can restore a prior "missing" card by sending 0 total quantity.
   if quantity + foil_quantity <= 0 {
     connection
       .execute(
@@ -1607,6 +1608,7 @@ fn set_owned_card_state(
     owned_item_id
   };
 
+  // Re-derive system tags so restored rows keep consistent `owned/foil/playset` semantics.
   let normalized_tags = derive_tags(quantity, foil_quantity, input.card.tags.clone());
   upsert_tags_for_owned_item(&connection, &input.profile_id, &owned_item_id, &normalized_tags)?;
 
@@ -1992,6 +1994,7 @@ fn get_ck_buylist_quotes(
       continue;
     }
 
+    // Weighted average handles mixed foil/nonfoil quantities in one aggregated quote row.
     let cash_price = (weighted_cash_total / weighted_qty as f64 * 100.0).round() / 100.0;
     let credit_price = (cash_price * 1.30 * 100.0).round() / 100.0;
     quotes.push(CkQuoteDto {

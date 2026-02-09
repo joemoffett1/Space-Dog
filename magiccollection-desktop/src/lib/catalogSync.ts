@@ -978,6 +978,7 @@ async function syncCatalogWithLocalStorage(
 }
 
 export async function syncCatalogFromMockPatches(): Promise<CatalogSyncResult> {
+  // Single-flight guard: concurrent refresh clicks join the same sync run.
   if (activeSyncRun) {
     updateSyncDiagnostics((current) => ({
       ...current,
@@ -1003,6 +1004,7 @@ export async function syncCatalogFromMockPatches(): Promise<CatalogSyncResult> {
     try {
       const manifest = await fetchJson<SyncManifest>('/mock-sync/manifest.json')
       const policy = resolvePolicy(manifest)
+      // Tauri runtime uses DB-backed transactional apply; browser fallback uses localStorage map apply.
       const result = hasTauriRuntime()
         ? await syncCatalogWithBackend(manifest, policy)
         : await syncCatalogWithLocalStorage(manifest, policy)

@@ -172,6 +172,7 @@ function App() {
 
   function captureUndoCards(cardIds: string[]): CardUndoEntry[] {
     const uniqueIds = [...new Set(cardIds)]
+    // Capture immutable pre-change snapshots so undo can restore exact prior values.
     return uniqueIds.map((cardId) => ({
       cardId,
       before: ownedCards[cardId] ? { ...ownedCards[cardId], tags: [...ownedCards[cardId].tags] } : null,
@@ -188,6 +189,7 @@ function App() {
       createdAt: new Date().toISOString(),
       cards,
     }
+    // Keep a bounded stack to prevent unbounded memory growth during long sessions.
     setUndoStack((previous) => [entry, ...previous].slice(0, MAX_UNDO_ENTRIES))
   }
 
@@ -659,6 +661,7 @@ function App() {
     setSyncProgressText('')
     setIsSyncing(true)
     try {
+      // Re-apply each prior card state in sequence so dependent DB rows (tags/locations) remain consistent.
       let latestCards = await getCollection(activeProfile.id)
       for (const row of entry.cards) {
         if (!row.before) {
