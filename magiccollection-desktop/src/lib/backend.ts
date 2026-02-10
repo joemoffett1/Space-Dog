@@ -16,6 +16,12 @@ import type {
 
 const MARKET_SNAPSHOT_KEY = 'magiccollection.market-snapshots.v1'
 
+export interface HydrateProfileCardMetadataResult {
+  attempted: number
+  hydrated: number
+  remaining: number
+}
+
 interface PriceHistoryEntry {
   price: number
   capturedAt: string
@@ -634,5 +640,17 @@ export async function getFilterTokens(
   }
   return invoke<FilterToken[]>('get_filter_tokens', {
     input: { query, limit },
+  })
+}
+
+export async function hydrateProfileCardMetadata(input: {
+  profileId: string
+  maxCards?: number
+}): Promise<HydrateProfileCardMetadataResult> {
+  if (!hasTauriRuntime()) {
+    return { attempted: 0, hydrated: 0, remaining: 0 }
+  }
+  return invoke<HydrateProfileCardMetadataResult>('hydrate_profile_card_metadata', {
+    input,
   })
 }

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;
+use std::thread;
 use std::time::{Duration, SystemTime};
 use tauri::{Manager, State};
 use uuid::Uuid;
@@ -182,6 +183,59 @@ struct ImportCollectionRowInput {
 struct ImportCollectionInput {
   profile_id: String,
   rows: Vec<ImportCollectionRowInput>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HydrateProfileCardMetadataInput {
+  profile_id: String,
+  max_cards: Option<usize>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct HydrateProfileCardMetadataResult {
+  attempted: i64,
+  hydrated: i64,
+  remaining: i64,
+}
+
+#[derive(Serialize)]
+struct ScryfallCollectionRequest {
+  identifiers: Vec<ScryfallCollectionIdentifier>,
+}
+
+#[derive(Serialize)]
+struct ScryfallCollectionIdentifier {
+  id: String,
+}
+
+#[derive(Deserialize)]
+struct ScryfallCollectionResponse {
+  data: Vec<ScryfallCollectionCard>,
+}
+
+#[derive(Deserialize)]
+struct ScryfallCollectionCard {
+  id: String,
+  type_line: Option<String>,
+  color_identity: Option<Vec<String>>,
+  cmc: Option<f64>,
+  rarity: Option<String>,
+  image_uris: Option<ScryfallImageUris>,
+  card_faces: Option<Vec<ScryfallCardFace>>,
+}
+
+#[derive(Deserialize)]
+struct ScryfallImageUris {
+  normal: Option<String>,
+  small: Option<String>,
+  art_crop: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ScryfallCardFace {
+  image_uris: Option<ScryfallImageUris>,
 }
 
 #[derive(Deserialize)]
@@ -917,6 +971,211 @@ fn load_ck_pricelist_items(state: &AppState) -> Result<Vec<CkPricelistItem>, Str
     return Ok(parsed);
   }
   Err("Unable to parse Card Kingdom buylist payload.".to_string())
+}
+
+fn list_missing_metadata_scryfall_ids(
+  connection: &Connection,
+  profile_id: &str,
+  limit: i64,
+) -> Result<Vec<String>, String> {
+  let mut statement = connection
+    .prepare(
+      "SELECT DISTINCT oi.printing_id
+       FROM owned_items oi
+       JOIN cards c ON c.id = oi.printing_id
+       JOIN printings p ON p.id = oi.printing_id
+       WHERE oi.profile_id = ?1
+         AND (oi.quantity > 0 OR oi.foil_quantity > 0)
+         AND (
+           c.type_line IS NULL OR trim(c.type_line) = ''
+           OR c.color_identity_json IS NULL
+           OR c.cmc IS NULL
+           OR p.rarity IS NULL OR trim(p.rarity) = ''
+         )
+       LIMIT ?2",
+    )
+    .map_err(|e| e.to_string())?;
+
+  let rows = statement
+    .query_map(params![profile_id, limit], |row| row.get::<usize, String>(0))
+    .map_err(|e| e.to_string())?;
+
+  let mut ids = Vec::new();
+  for row in rows {
+    ids.push(row.map_err(|e| e.to_string())?);
+  }
+  Ok(ids)
+}
+
+fn count_missing_metadata_rows(connection: &Connection, profile_id: &str) -> Result<i64, String> {
+  connection
+    .query_row(
+      "SELECT count(*)
+       FROM owned_items oi
+       JOIN cards c ON c.id = oi.printing_id
+       JOIN printings p ON p.id = oi.printing_id
+       WHERE oi.profile_id = ?1
+         AND (oi.quantity > 0 OR oi.foil_quantity > 0)
+         AND (
+           c.type_line IS NULL OR trim(c.type_line) = ''
+           OR c.color_identity_json IS NULL
+           OR c.cmc IS NULL
+           OR p.rarity IS NULL OR trim(p.rarity) = ''
+         )",
+      params![profile_id],
+      |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+fn fetch_scryfall_collection_cards(ids: &[String]) -> Result<Vec<ScryfallCollectionCard>, String> {
+  if ids.is_empty() {
+    return Ok(Vec::new());
+  }
+
+  let client = Client::builder()
+    .timeout(Duration::from_secs(30))
+    .build()
+    .map_err(|e| e.to_string())?;
+
+  let payload = ScryfallCollectionRequest {
+    identifiers: ids
+      .iter()
+      .map(|id| ScryfallCollectionIdentifier { id: id.clone() })
+      .collect(),
+  };
+
+  let response = client
+    .post("https://api.scryfall.com/cards/collection")
+    .header(
+      USER_AGENT,
+      "MagicCollectionDesktop/1.0 (+https://github.com/joemoffett1/Space-Dog)",
+    )
+    .header(ACCEPT, "application/json")
+    .header(ACCEPT_LANGUAGE, "en-US,en;q=0.9")
+    .json(&payload)
+    .send()
+    .map_err(|e| e.to_string())?;
+
+  if !response.status().is_success() {
+    return Err(format!(
+      "Scryfall metadata request failed with status {}",
+      response.status()
+    ));
+  }
+
+  let body: ScryfallCollectionResponse = response.json().map_err(|e| e.to_string())?;
+  Ok(body.data)
+}
+
+fn hydrate_printing_metadata_batch(
+  connection: &Connection,
+  cards: &[ScryfallCollectionCard],
+) -> Result<i64, String> {
+  if cards.is_empty() {
+    return Ok(0);
+  }
+
+  let mut hydrated = 0_i64;
+  let now = now_iso();
+
+  for card in cards {
+    let scryfall_id = card.id.trim();
+    if scryfall_id.is_empty() {
+      continue;
+    }
+
+    let normalized_type_line = card
+      .type_line
+      .as_ref()
+      .map(|value| value.trim().to_string())
+      .filter(|value| !value.is_empty());
+
+    let color_identity_json = card
+      .color_identity
+      .as_ref()
+      .map(|values| serde_json::to_string(values).unwrap_or_else(|_| "[]".to_string()));
+
+    let cmc = card.cmc.filter(|value| value.is_finite() && *value >= 0.0);
+    let rarity = card
+      .rarity
+      .as_ref()
+      .map(|value| value.trim().to_lowercase())
+      .filter(|value| !value.is_empty());
+
+    let normal_image = card
+      .image_uris
+      .as_ref()
+      .and_then(|uris| uris.normal.clone())
+      .or_else(|| {
+        card
+          .card_faces
+          .as_ref()
+          .and_then(|faces| faces.first())
+          .and_then(|face| face.image_uris.as_ref())
+          .and_then(|uris| uris.normal.clone())
+      });
+    let small_image = card
+      .image_uris
+      .as_ref()
+      .and_then(|uris| uris.small.clone())
+      .or_else(|| {
+        card
+          .card_faces
+          .as_ref()
+          .and_then(|faces| faces.first())
+          .and_then(|face| face.image_uris.as_ref())
+          .and_then(|uris| uris.small.clone())
+      });
+    let art_crop_image = card
+      .image_uris
+      .as_ref()
+      .and_then(|uris| uris.art_crop.clone())
+      .or_else(|| {
+        card
+          .card_faces
+          .as_ref()
+          .and_then(|faces| faces.first())
+          .and_then(|face| face.image_uris.as_ref())
+          .and_then(|uris| uris.art_crop.clone())
+      });
+
+    connection
+      .execute(
+        "UPDATE cards
+         SET type_line = COALESCE(?1, type_line),
+             color_identity_json = COALESCE(?2, color_identity_json),
+             cmc = COALESCE(?3, cmc),
+             updated_at = ?4
+         WHERE id = ?5",
+        params![normalized_type_line, color_identity_json, cmc, now, scryfall_id],
+      )
+      .map_err(|e| e.to_string())?;
+
+    connection
+      .execute(
+        "UPDATE printings
+         SET rarity = COALESCE(?1, rarity),
+             image_normal_url = COALESCE(?2, image_normal_url),
+             image_small_url = COALESCE(?3, image_small_url),
+             image_art_crop_url = COALESCE(?4, image_art_crop_url),
+             updated_at = ?5
+         WHERE id = ?6",
+        params![
+          rarity,
+          normal_image,
+          small_image,
+          art_crop_image,
+          now,
+          scryfall_id
+        ],
+      )
+      .map_err(|e| e.to_string())?;
+
+    hydrated += 1;
+  }
+
+  Ok(hydrated)
 }
 
 fn make_ck_source_url(raw: Option<&str>) -> String {
@@ -1662,6 +1921,41 @@ fn import_collection_rows(
 
   sync_filter_tokens_for_profile(&connection, &input.profile_id)?;
   load_collection_rows(&connection, &input.profile_id)
+}
+
+#[tauri::command]
+fn hydrate_profile_card_metadata(
+  state: State<'_, AppState>,
+  input: HydrateProfileCardMetadataInput,
+) -> Result<HydrateProfileCardMetadataResult, String> {
+  let connection = open_database(&state.db_path)?;
+  ensure_profile_exists(&connection, &input.profile_id)?;
+
+  let max_cards = input.max_cards.unwrap_or(1200).max(75).min(9000) as i64;
+  let targets = list_missing_metadata_scryfall_ids(&connection, &input.profile_id, max_cards)?;
+  if targets.is_empty() {
+    return Ok(HydrateProfileCardMetadataResult {
+      attempted: 0,
+      hydrated: 0,
+      remaining: 0,
+    });
+  }
+
+  let mut hydrated = 0_i64;
+  for batch in targets.chunks(75) {
+    let cards = fetch_scryfall_collection_cards(batch)?;
+    hydrated += hydrate_printing_metadata_batch(&connection, &cards)?;
+    thread::sleep(Duration::from_millis(80));
+  }
+
+  sync_filter_tokens_for_profile(&connection, &input.profile_id)?;
+  let remaining = count_missing_metadata_rows(&connection, &input.profile_id)?;
+
+  Ok(HydrateProfileCardMetadataResult {
+    attempted: targets.len() as i64,
+    hydrated,
+    remaining,
+  })
 }
 
 #[tauri::command]
@@ -2487,6 +2781,7 @@ pub fn run() {
       update_card_quantity,
       remove_card_from_collection,
       import_collection_rows,
+      hydrate_profile_card_metadata,
       bulk_update_tags,
       update_owned_card_metadata,
       set_owned_card_state,

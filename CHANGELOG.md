@@ -8,6 +8,16 @@ Versioning policy for alpha:
 - Increment `patch` (`x` in `1.0.x-alpha`) for updates/fixes to existing features.
 - Use engineering discretion on feature vs update.
 
+## [1.20.7-alpha] - 2026-02-10
+### Changed
+- Added Scryfall metadata hydration pipeline for owned cards with missing metadata (`type_line`, color identity, CMC, rarity, image URLs):
+  - new backend command `hydrate_profile_card_metadata`
+  - batch fetches via Scryfall collection endpoint (75 IDs/request)
+  - updates local SQLite `cards` and `printings` rows
+  - re-syncs filter tokens after hydration
+- Wired Collection type-search flow (`t:` / `type:`) to auto-trigger metadata hydration when type metadata is missing in the active profile.
+- Added in-UI status messaging when type metadata is missing/hydrating so type-filter behavior is transparent.
+
 ## [1.20.6-alpha] - 2026-02-10
 ### Changed
 - Fixed inline search token UX so bare prefix terms (for example `set:` / `t:`) continue to drive contextual suggestions without requiring a click back into that token box.

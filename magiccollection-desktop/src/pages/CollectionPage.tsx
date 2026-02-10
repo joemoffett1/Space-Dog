@@ -44,6 +44,7 @@ interface CollectionPageProps {
     copiesImported: number
     rowsSkipped: number
   }>
+  onHydrateTypeMetadata?: () => Promise<void>
   isSyncing?: boolean
 }
 
@@ -705,6 +706,7 @@ export function CollectionPage({
   canUndo,
   undoLabel = '',
   onImportArchidektCsv,
+  onHydrateTypeMetadata,
   isSyncing = false,
 }: CollectionPageProps) {
   const [importMessage, setImportMessage] = useState('')
@@ -766,6 +768,8 @@ export function CollectionPage({
   const [editNotes, setEditNotes] = useState('')
   const [editPurchasePrice, setEditPurchasePrice] = useState('')
   const [editDateAdded, setEditDateAdded] = useState('')
+  const [didRequestTypeHydration, setDidRequestTypeHydration] = useState(false)
+  const [isHydratingTypeMetadata, setIsHydratingTypeMetadata] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -1004,6 +1008,38 @@ export function CollectionPage({
   ])
 
   const parsedSearchPlan = useMemo(() => parseSearchPlan(searchQuery), [searchQuery])
+  const missingTypeMetadataCount = useMemo(
+    () =>
+      cards.reduce(
+        (count, card) => count + ((card.typeLine ?? '').trim() ? 0 : 1),
+        0,
+      ),
+    [cards],
+  )
+
+  useEffect(() => {
+    setDidRequestTypeHydration(false)
+    setIsHydratingTypeMetadata(false)
+  }, [profileId])
+
+  useEffect(() => {
+    if (parsedSearchPlan.typeTerms.length <= 0) {
+      return
+    }
+    if (!onHydrateTypeMetadata || didRequestTypeHydration || missingTypeMetadataCount <= 0) {
+      return
+    }
+    setDidRequestTypeHydration(true)
+    setIsHydratingTypeMetadata(true)
+    void onHydrateTypeMetadata().finally(() => {
+      setIsHydratingTypeMetadata(false)
+    })
+  }, [
+    parsedSearchPlan.typeTerms.length,
+    onHydrateTypeMetadata,
+    didRequestTypeHydration,
+    missingTypeMetadataCount,
+  ])
 
   const filteredCards = useMemo(() => {
     return cards.filter((card) => {
@@ -1866,6 +1902,13 @@ export function CollectionPage({
           <p className="muted small search-help-line">
             {'Tip: use set:mh3 tag:owned c:ur mv>=3 for fast narrowing.'}
           </p>
+          {parsedSearchPlan.typeTerms.length > 0 && missingTypeMetadataCount > 0 ? (
+            <p className="muted small search-help-line">
+              {isHydratingTypeMetadata
+                ? `Hydrating missing type metadata from Scryfall (${missingTypeMetadataCount} cards missing type data)...`
+                : `Type metadata missing for ${missingTypeMetadataCount} cards. Type filter precision may be limited.`}
+            </p>
+          ) : null}
         </div>
       </div>
 

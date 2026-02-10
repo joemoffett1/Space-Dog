@@ -12,6 +12,7 @@ import {
   bulkUpdateTags,
   createProfile,
   getCollection,
+  hydrateProfileCardMetadata,
   importCollectionRows,
   listProfiles,
   recordMarketSnapshots,
@@ -99,6 +100,7 @@ function App() {
   const [isAuthBusy, setIsAuthBusy] = useState(false)
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([])
   const refreshAbortRef = useRef<AbortController | null>(null)
+  const metadataHydrationRef = useRef(false)
 
   const activeProfile = useMemo(
     () => profiles.find((profile) => profile.id === activeProfileId) ?? null,
@@ -196,6 +198,44 @@ function App() {
   async function restoreCollectionFromBackend(profileId: string) {
     const cards = await getCollection(profileId)
     setOwnedCards(asCardMap(cards))
+  }
+
+  async function handleHydrateTypeMetadata(): Promise<void> {
+    if (!activeProfile || metadataHydrationRef.current) {
+      return
+    }
+    metadataHydrationRef.current = true
+    const profileId = activeProfile.id
+    try {
+      let loops = 0
+      let remaining = Number.MAX_SAFE_INTEGER
+      let changed = false
+      while (loops < 20 && remaining > 0) {
+        const result = await hydrateProfileCardMetadata({
+          profileId,
+          maxCards: 1200,
+        })
+        remaining = result.remaining
+        if (result.hydrated > 0) {
+          changed = true
+        }
+        if (result.attempted <= 0 || result.hydrated <= 0) {
+          break
+        }
+        loops += 1
+      }
+      if (changed && activeProfileId === profileId) {
+        await restoreCollectionFromBackend(profileId)
+      }
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? `Type metadata sync failed: ${error.message}`
+          : 'Type metadata sync failed.',
+      )
+    } finally {
+      metadataHydrationRef.current = false
+    }
   }
 
   function refreshProtectedProfiles(nextProfiles: Profile[]) {
@@ -1076,6 +1116,7 @@ function App() {
             onBulkUpdateMetadata={handleBulkUpdateCardMetadata}
             onOpenMarket={() => setActiveTab('market')}
             onImportArchidektCsv={handleImportArchidektCsv}
+            onHydrateTypeMetadata={handleHydrateTypeMetadata}
             onUndoLastAction={handleUndoLastAction}
             canUndo={undoStack.length > 0}
             undoLabel={latestUndo ? `${latestUndo.label} (${new Date(latestUndo.createdAt).toLocaleTimeString()})` : ''}
