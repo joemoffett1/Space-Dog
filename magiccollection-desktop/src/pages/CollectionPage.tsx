@@ -124,6 +124,28 @@ const PRICE_SOURCE_OPTIONS = [
   { id: 'ck-buylist', label: 'CK Buylist (soon)' },
   { id: 'multi-source', label: 'Multi-source (soon)' },
 ] as const
+const SEARCH_FIELD_PREFIXES = [
+  'set:',
+  'tag:',
+  't:',
+  'type:',
+  'c:',
+  'id:',
+  'lang:',
+  'cond:',
+  'rarity:',
+] as const
+const DEFAULT_TYPE_OPTIONS = [
+  'artifact',
+  'battle',
+  'creature',
+  'enchantment',
+  'instant',
+  'land',
+  'planeswalker',
+  'sorcery',
+  'tribal',
+] as const
 const SORT_MODE_LABELS: Record<SortMode, string> = {
   'qty-desc': 'Quantity',
   'name-asc': 'Name',
@@ -496,6 +518,33 @@ function normalizeSearchTerms(terms: string[]): string[] {
   return terms.map((term) => term.trim()).filter((term) => term.length > 0)
 }
 
+function getBareSearchFieldPrefix(term: string): string | null {
+  const normalized = term.trim().toLowerCase()
+  for (const prefix of SEARCH_FIELD_PREFIXES) {
+    if (normalized === prefix) {
+      return prefix
+    }
+  }
+  return null
+}
+
+function buildSearchQueryTerms(terms: string[], draft: string): string[] {
+  const normalizedTerms = normalizeSearchTerms(terms)
+  const normalizedDraft = draft.trim()
+  if (normalizedTerms.length > 0) {
+    const lastIndex = normalizedTerms.length - 1
+    const lastPrefix = getBareSearchFieldPrefix(normalizedTerms[lastIndex])
+    if (lastPrefix && normalizedDraft) {
+      normalizedTerms[lastIndex] = `${lastPrefix}${normalizedDraft.toLowerCase()}`
+      return normalizedTerms
+    }
+  }
+  if (normalizedDraft) {
+    normalizedTerms.push(normalizedDraft)
+  }
+  return normalizedTerms
+}
+
 function getSearchTermBoxes(terms: string[]): SearchTermBox[] {
   return normalizeSearchTerms(terms).map((term) => ({
     token: term,
@@ -767,10 +816,19 @@ export function CollectionPage({
     [cards],
   )
   const typeOptions = useMemo(
-    () =>
-      [...new Set(cards.map((card) => inferPrimaryType(card.typeLine)))].sort((a, b) =>
-        a.localeCompare(b),
-      ),
+    () => {
+      const merged = new Set<string>()
+      for (const card of cards) {
+        const inferred = inferPrimaryType(card.typeLine)
+        if (inferred && inferred !== 'unknown') {
+          merged.add(inferred)
+        }
+      }
+      for (const canonical of DEFAULT_TYPE_OPTIONS) {
+        merged.add(canonical)
+      }
+      return [...merged].sort((a, b) => a.localeCompare(b))
+    },
     [cards],
   )
   const colorOptions = useMemo(
@@ -808,16 +866,23 @@ export function CollectionPage({
       ),
     [cards],
   )
-  const searchQuery = useMemo(
-    () => [...normalizeSearchTerms(searchTerms), searchDraft.trim()].filter(Boolean).join(' '),
+  const searchQueryTerms = useMemo(
+    () => buildSearchQueryTerms(searchTerms, searchDraft),
     [searchTerms, searchDraft],
   )
+  const searchQuery = useMemo(() => searchQueryTerms.join(' '), [searchQueryTerms])
   const searchTermBoxes = useMemo(() => getSearchTermBoxes(searchTerms), [searchTerms])
   const activeSuggestionNeedle = useMemo(() => {
     if (activeSearchBoxIndex >= 0) {
       return (searchTerms[activeSearchBoxIndex] ?? '').trim().toLowerCase()
     }
-    return searchDraft.trim().toLowerCase()
+    const draft = searchDraft.trim().toLowerCase()
+    const lastCommittedPrefix =
+      searchTerms.length > 0 ? getBareSearchFieldPrefix(searchTerms[searchTerms.length - 1]) : null
+    if (lastCommittedPrefix) {
+      return `${lastCommittedPrefix}${draft}`
+    }
+    return draft
   }, [activeSearchBoxIndex, searchTerms, searchDraft])
 
   const contextualTokenSuggestions = useMemo(() => {
@@ -1200,7 +1265,19 @@ export function CollectionPage({
     if (!normalizedDraft) {
       return
     }
-    setSearchTerms((previous) => [...previous, normalizedDraft])
+    setSearchTerms((previous) => {
+      const next = [...previous]
+      const lastIndex = next.length - 1
+      if (lastIndex >= 0) {
+        const prefix = getBareSearchFieldPrefix(next[lastIndex])
+        if (prefix) {
+          next[lastIndex] = `${prefix}${normalizedDraft.toLowerCase()}`
+          return next
+        }
+      }
+      next.push(normalizedDraft)
+      return next
+    })
     setSearchDraft('')
     setActiveSearchBoxIndex(-1)
   }
@@ -1232,7 +1309,16 @@ export function CollectionPage({
     if (activeSearchBoxIndex >= 0) {
       updateSearchTermAt(activeSearchBoxIndex, token)
     } else {
-      setSearchTerms((previous) => [...previous, token])
+      setSearchTerms((previous) => {
+        const next = [...previous]
+        const lastIndex = next.length - 1
+        if (lastIndex >= 0 && getBareSearchFieldPrefix(next[lastIndex])) {
+          next[lastIndex] = token
+          return next
+        }
+        next.push(token)
+        return next
+      })
       setSearchDraft('')
     }
     setActiveSuggestionIndex(0)
@@ -1692,6 +1778,12 @@ export function CollectionPage({
                     className="search-term-box-input"
                     type="text"
                     value={searchTerms[index] ?? ''}
+                    style={{
+                      width: `${Math.max(
+                        4,
+                        Math.min(40, (searchTerms[index] ?? '').trim().length + 1),
+                      )}ch`,
+                    }}
                     onChange={(event) => updateSearchTermAt(index, event.target.value)}
                     onFocus={() => {
                       handleSearchFocus()
@@ -1727,6 +1819,9 @@ export function CollectionPage({
                 type="text"
                 placeholder='Search cards (supports set:, t:, tag:, c:, mv>=, is:foil)'
                 value={searchDraft}
+                style={{
+                  width: `${Math.max(8, Math.min(40, searchDraft.trim().length + 2))}ch`,
+                }}
                 onChange={(event) => handleSearchDraftChange(event.target.value)}
                 onFocus={() => {
                   handleSearchFocus()

@@ -717,7 +717,7 @@ th {
   align-items: center;
   gap: 0.22rem;
   padding: 0.16rem 0.22rem 0.16rem 0.42rem;
-  max-width: 13rem;
+  max-width: min(36rem, 100%);
 }
 
 .search-term-box-input {
@@ -748,8 +748,8 @@ th {
 }
 
 .search-draft-input {
-  flex: 1 1 12rem;
-  min-width: 9rem;
+  flex: 0 1 auto;
+  min-width: 8ch;
 }
 
 .search-draft-input[class*='chip-kind-'] {

@@ -8,6 +8,15 @@ Versioning policy for alpha:
 - Increment `patch` (`x` in `1.0.x-alpha`) for updates/fixes to existing features.
 - Use engineering discretion on feature vs update.
 
+## [1.20.6-alpha] - 2026-02-10
+### Changed
+- Fixed inline search token UX so bare prefix terms (for example `set:` / `t:`) continue to drive contextual suggestions without requiring a click back into that token box.
+- Added prefix carryover behavior: typing in the next draft slot now fills the trailing bare prefix token instead of creating a disconnected free-text token.
+- Improved `t:` search behavior:
+  - `t:` now always maps to type search (Scryfall-style alias of `type:`).
+  - type suggestions now include canonical MTG type vocabulary even when collection metadata is sparse.
+- Updated inline token box sizing to be content-driven (`ch` width) so term boxes and draft input expand/contract with entered text.
+
 ## [1.20.5-alpha] - 2026-02-10
 ### Added
 - Added Playwright E2E test harness in `magiccollection-desktop`:
