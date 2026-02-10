@@ -983,74 +983,93 @@ function App() {
     <div className="app-shell">
       <div className="atmo-ring atmo-ring-a" />
       <div className="atmo-ring atmo-ring-b" />
-      <header className="app-header">
-        <div>
-          <p className="app-kicker">MagicCollection Desktop</p>
-          <h1>{activeProfile.name}</h1>
-        </div>
-        <div className="profile-meta">
-          <span
-            className={`data-sync-pill ${
-              isSyncing ? 'syncing' : isDataBuildSynced ? 'synced' : 'unsynced'
-            }`}
-            title={
-              isSyncing
-                ? 'Sync in progress.'
-                : isDataBuildSynced
-                ? `Local build ${localBuildVersion} matches latest.`
-                : `Local build ${localBuildVersion ?? 'none'} is behind latest ${dataBuildVersion}.`
-            }
-          >
-            {isSyncing && syncProgressPct !== null ? (
-              <span className="sync-progress-pill">
-                <span
-                  className="sync-progress-fill"
-                  style={{ width: `${Math.max(0, Math.min(100, syncProgressPct))}%` }}
-                />
-                <span className="sync-progress-text">
-                  {syncProgressText ? `${syncProgressText} ` : ''}{Math.max(0, Math.min(100, syncProgressPct))}%
-                </span>
+      <section className="app-top-frame">
+        <header className="app-header">
+          <div className="brand-lockup">
+            <span className="brand-medallion" aria-hidden="true">
+              <img src="/ui-icons/paw.svg" alt="" />
+            </span>
+            <div className="brand-copy">
+              <p className="app-kicker">MagicCollection Desktop</p>
+              <h1>{activeProfile.name}</h1>
+              <p className="profile-subtitle">Collection Control Center</p>
+            </div>
+          </div>
+          <div className="profile-meta">
+            <div className="sync-utility-cluster">
+              <span
+                className={`data-sync-pill ${
+                  isSyncing ? 'syncing' : isDataBuildSynced ? 'synced' : 'unsynced'
+                }`}
+                title={
+                  isSyncing
+                    ? 'Sync in progress.'
+                    : isDataBuildSynced
+                    ? `Local build ${localBuildVersion} matches latest.`
+                    : `Local build ${localBuildVersion ?? 'none'} is behind latest ${dataBuildVersion}.`
+                }
+              >
+                {isSyncing && syncProgressPct !== null ? (
+                  <span className="sync-progress-pill">
+                    <span
+                      className="sync-progress-fill"
+                      style={{ width: `${Math.max(0, Math.min(100, syncProgressPct))}%` }}
+                    />
+                    <span className="sync-progress-text">
+                      {syncProgressText ? `${syncProgressText} ` : ''}{Math.max(0, Math.min(100, syncProgressPct))}%
+                    </span>
+                  </span>
+                ) : isSyncing ? (
+                  'Syncing...'
+                ) : isDataBuildSynced ? (
+                  'Synced'
+                ) : (
+                  'Not Synced'
+                )}
               </span>
-            ) : isSyncing ? (
-              'Syncing...'
-            ) : isDataBuildSynced ? (
-              'Synced'
-            ) : (
-              'Not Synced'
-            )}
-          </span>
-          <button
-            className="refresh-icon-button"
-            type="button"
-            onClick={() =>
-              isSyncing ? handleCancelSync() : void handleRefreshCollectionPrices()
-            }
-            disabled={!isSyncing && !refreshEnabled}
-            title={isSyncing ? 'Cancel sync' : refreshTitle}
-            aria-label={isSyncing ? 'Cancel sync' : 'Refresh catalog data build'}
-          >
-            {isSyncing ? 'X' : 'R'}
-          </button>
-          <button className="button subtle" onClick={handleSignOut}>
-            Change Collection
-          </button>
-          <button className="button subtle" onClick={handleLocalAuthSignOut}>
-            Sign Out Account
-          </button>
-        </div>
-      </header>
+              <button
+                className={`refresh-icon-button paw-icon-button ${
+                  isSyncing ? 'syncing' : refreshEnabled ? 'ready' : 'locked'
+                }`}
+                type="button"
+                onClick={() =>
+                  isSyncing ? handleCancelSync() : void handleRefreshCollectionPrices()
+                }
+                disabled={!isSyncing && !refreshEnabled}
+                title={isSyncing ? 'Cancel sync' : refreshTitle}
+                aria-label={isSyncing ? 'Cancel sync' : 'Refresh catalog data build'}
+              >
+                <span className="paw-refresh-icon-wrap" aria-hidden="true">
+                  <img src="/ui-icons/paw.svg" className="paw-refresh-icon" alt="" />
+                </span>
+                <span className="paw-label">{isSyncing ? 'X' : '↻'}</span>
+              </button>
+            </div>
+            <div className="profile-action-cluster">
+              <button className="button subtle paw-pill" onClick={handleSignOut}>
+                Change Collection
+              </button>
+              <button className="button subtle paw-pill" onClick={handleLocalAuthSignOut}>
+                Sign Out Account
+              </button>
+            </div>
+          </div>
+        </header>
 
-      {errorMessage ? <p className="error-line">{errorMessage}</p> : null}
+        {errorMessage ? <p className="error-line">{errorMessage}</p> : null}
 
-      <AppNav activeTab={activeTab} onSelectTab={handleSelectTab} />
+        <AppNav activeTab={activeTab} onSelectTab={handleSelectTab} />
+      </section>
 
       <main className="app-main">
         {activeTab === 'collection' && (
           <CollectionPage
             cards={sortedCards}
+            profileId={activeProfile.id}
             profileName={activeProfile.name}
             onIncrement={handleIncrementCardQuantity}
             onDecrement={handleDecrementCardQuantity}
+            onAddPrinting={handleAddCard}
             onRemove={handleRemoveCard}
             onTagCard={handleTagCard}
             onUpdateMetadata={handleUpdateCardMetadata}

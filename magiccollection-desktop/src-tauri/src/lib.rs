@@ -12,10 +12,12 @@ use uuid::Uuid;
 
 const MIGRATION_SQL_0001: &str = include_str!("../migrations/0001_initial.sql");
 const MIGRATION_SQL_0002: &str = include_str!("../migrations/0002_catalog_sync.sql");
+const MIGRATION_SQL_0003: &str = include_str!("../migrations/0003_filter_tokens.sql");
 const CATALOG_DATASET_DEFAULT: &str = "default_cards";
 const CK_PRICELIST_URL: &str = "https://api.cardkingdom.com/api/v2/pricelist";
 const CK_PRICELIST_CACHE_FILE: &str = "ck_pricelist_cache.json";
 const CK_PRICELIST_CACHE_MAX_AGE_SECONDS: u64 = 60 * 60 * 12;
+const FILTER_TOKEN_DEFAULT_LIMIT: i64 = 30;
 
 #[derive(Clone)]
 struct AppState {
@@ -39,6 +41,10 @@ struct OwnedCardDto {
   set_code: String,
   collector_number: String,
   image_url: Option<String>,
+  type_line: Option<String>,
+  color_identity: Vec<String>,
+  mana_value: Option<f64>,
+  rarity: Option<String>,
   quantity: i64,
   foil_quantity: i64,
   updated_at: String,
@@ -76,6 +82,10 @@ struct AddCardInput {
   set_code: String,
   collector_number: String,
   image_url: Option<String>,
+  type_line: Option<String>,
+  color_identity: Option<Vec<String>>,
+  mana_value: Option<f64>,
+  rarity: Option<String>,
   foil: bool,
   current_price: Option<f64>,
   tags: Option<Vec<String>>,
@@ -127,6 +137,10 @@ struct SetOwnedCardStateCardInput {
   set_code: String,
   collector_number: String,
   image_url: Option<String>,
+  type_line: Option<String>,
+  color_identity: Option<Vec<String>>,
+  mana_value: Option<f64>,
+  rarity: Option<String>,
   quantity: i64,
   foil_quantity: i64,
   condition_code: Option<String>,
@@ -154,6 +168,10 @@ struct ImportCollectionRowInput {
   set_code: String,
   collector_number: String,
   image_url: Option<String>,
+  type_line: Option<String>,
+  color_identity: Option<Vec<String>>,
+  mana_value: Option<f64>,
+  rarity: Option<String>,
   quantity: i64,
   foil_quantity: i64,
   tags: Option<Vec<String>>,
@@ -249,6 +267,23 @@ struct CatalogApplyResultDto {
   removed_count: i64,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct FilterTokenDto {
+  token: String,
+  label: String,
+  kind: String,
+  source: String,
+  priority: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FilterTokenQueryInput {
+  query: Option<String>,
+  limit: Option<i64>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CatalogPatchApplyInput {
@@ -300,6 +335,10 @@ fn init_database(db_path: &PathBuf) -> Result<(), String> {
   connection
     .execute_batch(MIGRATION_SQL_0002)
     .map_err(|e| e.to_string())?;
+  connection
+    .execute_batch(MIGRATION_SQL_0003)
+    .map_err(|e| e.to_string())?;
+  seed_default_filter_tokens(&connection)?;
   Ok(())
 }
 
@@ -524,6 +563,10 @@ fn ensure_card_and_printing(
   set_code: &str,
   collector_number: &str,
   image_url: Option<&str>,
+  type_line: Option<&str>,
+  color_identity: Option<&[String]>,
+  mana_value: Option<f64>,
+  rarity: Option<&str>,
 ) -> Result<(), String> {
   let now = now_iso();
   let normalized_set = set_code.trim().to_lowercase();
@@ -532,15 +575,41 @@ fn ensure_card_and_printing(
   } else {
     normalized_set.to_uppercase()
   };
+  let normalized_type_line = type_line
+    .map(|value| value.trim().to_string())
+    .filter(|value| !value.is_empty());
+  let color_identity_json = color_identity
+    .and_then(|values| {
+      if values.is_empty() {
+        None
+      } else {
+        Some(serde_json::to_string(values).unwrap_or_else(|_| "[]".to_string()))
+      }
+    });
+  let normalized_rarity = rarity
+    .map(|value| value.trim().to_lowercase())
+    .filter(|value| !value.is_empty());
 
   connection
     .execute(
-      "INSERT INTO cards (id, oracle_id, name, created_at, updated_at)
-       VALUES (?1, NULL, ?2, ?3, ?3)
+      "INSERT INTO cards (
+         id, oracle_id, name, type_line, color_identity_json, cmc, created_at, updated_at
+       )
+       VALUES (?1, NULL, ?2, ?3, ?4, ?5, ?6, ?6)
        ON CONFLICT(id) DO UPDATE SET
          name = excluded.name,
+         type_line = COALESCE(excluded.type_line, cards.type_line),
+         color_identity_json = COALESCE(excluded.color_identity_json, cards.color_identity_json),
+         cmc = COALESCE(excluded.cmc, cards.cmc),
          updated_at = excluded.updated_at",
-      params![scryfall_id, name.trim(), now],
+      params![
+        scryfall_id,
+        name.trim(),
+        normalized_type_line,
+        color_identity_json,
+        mana_value,
+        now
+      ],
     )
     .map_err(|e| e.to_string())?;
 
@@ -551,11 +620,12 @@ fn ensure_card_and_printing(
           rarity, language, is_token, image_normal_url, image_small_url, image_art_crop_url,
           created_at, updated_at
         )
-        VALUES (?1, ?1, ?1, ?2, ?3, ?4, NULL, 'en', 0, ?5, ?5, ?5, ?6, ?6)
+        VALUES (?1, ?1, ?1, ?2, ?3, ?4, ?5, 'en', 0, ?6, ?6, ?6, ?7, ?7)
         ON CONFLICT(id) DO UPDATE SET
           set_code = excluded.set_code,
           set_name = excluded.set_name,
           collector_number = excluded.collector_number,
+          rarity = COALESCE(excluded.rarity, printings.rarity),
           image_normal_url = COALESCE(excluded.image_normal_url, printings.image_normal_url),
           image_small_url = COALESCE(excluded.image_small_url, printings.image_small_url),
           image_art_crop_url = COALESCE(excluded.image_art_crop_url, printings.image_art_crop_url),
@@ -565,6 +635,7 @@ fn ensure_card_and_printing(
         normalized_set,
         set_name,
         collector_number.trim(),
+        normalized_rarity,
         image_url,
         now
       ],
@@ -856,6 +927,287 @@ fn make_ck_source_url(raw: Option<&str>) -> String {
   format!("https://www.cardkingdom.com/{}", path)
 }
 
+fn parse_color_identity_json(raw: Option<String>) -> Vec<String> {
+  let Some(value) = raw else {
+    return Vec::new();
+  };
+  if value.trim().is_empty() {
+    return Vec::new();
+  }
+  serde_json::from_str::<Vec<String>>(&value).unwrap_or_default()
+}
+
+fn upsert_filter_token(
+  connection: &Connection,
+  token: &str,
+  label: &str,
+  kind: &str,
+  source: &str,
+  priority: i64,
+) -> Result<(), String> {
+  let normalized_token = token.trim().to_lowercase();
+  if normalized_token.is_empty() {
+    return Ok(());
+  }
+  let normalized_label = label.trim();
+  if normalized_label.is_empty() {
+    return Ok(());
+  }
+  let normalized_kind = kind.trim().to_lowercase();
+  let normalized_source = source.trim().to_lowercase();
+  let now = now_iso();
+  connection
+    .execute(
+      "INSERT INTO filter_tokens (
+         id, token, label, kind, source, priority, created_at, updated_at
+       )
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+       ON CONFLICT(kind, token) DO UPDATE SET
+         label = excluded.label,
+         source = excluded.source,
+         priority = excluded.priority,
+         updated_at = excluded.updated_at",
+      params![
+        format!("{}:{}", normalized_kind, normalized_token),
+        normalized_token,
+        normalized_label,
+        normalized_kind,
+        normalized_source,
+        priority,
+        now
+      ],
+    )
+    .map_err(|e| e.to_string())?;
+  Ok(())
+}
+
+fn seed_default_filter_tokens(connection: &Connection) -> Result<(), String> {
+  let defaults: [(&str, &str, &str, i64); 20] = [
+    ("set:", "Set code (example: set:neo)", "syntax", 1),
+    ("t:", "Type line (example: t:creature)", "syntax", 2),
+    ("type:", "Type line (example: type:instant)", "syntax", 3),
+    ("tag:", "Internal tag (example: tag:owned)", "syntax", 4),
+    ("c:", "Color identity contains (example: c:uw)", "syntax", 5),
+    ("id:", "Color identity strict-ish (example: id:g)", "syntax", 6),
+    ("rarity:", "Rarity (example: rarity:rare)", "syntax", 7),
+    ("mv:", "Mana value exact (example: mv:3)", "syntax", 8),
+    ("mv>=", "Mana value compare (example: mv>=4)", "syntax", 9),
+    ("mv<=", "Mana value compare (example: mv<=2)", "syntax", 10),
+    ("name:", "Card name contains text", "syntax", 11),
+    ("lang:", "Language (example: lang:en)", "syntax", 12),
+    ("cond:", "Condition (example: cond:nm)", "syntax", 13),
+    ("is:foil", "Cards with foil copies", "syntax", 14),
+    ("is:nonfoil", "Cards with nonfoil copies", "syntax", 15),
+    ("is:playset", "Cards with 4+ total copies", "syntax", 16),
+    ("sort:name", "Sort by name", "syntax", 17),
+    ("sort:qty", "Sort by total quantity", "syntax", 18),
+    ("sort:price", "Sort by market price", "syntax", 19),
+    ("sort:trend", "Sort by price trend", "syntax", 20),
+  ];
+
+  for (token, label, kind, priority) in defaults {
+    upsert_filter_token(connection, token, label, kind, "seed", priority)?;
+  }
+  Ok(())
+}
+
+fn extract_primary_type(type_line: Option<&str>) -> Option<String> {
+  let text = type_line?.trim();
+  if text.is_empty() {
+    return None;
+  }
+  let left = text.split('—').next().unwrap_or(text).trim().to_lowercase();
+  if left.is_empty() {
+    return None;
+  }
+  let known = [
+    "artifact",
+    "battle",
+    "creature",
+    "enchantment",
+    "instant",
+    "land",
+    "planeswalker",
+    "sorcery",
+    "tribal",
+  ];
+  for value in known {
+    if left.contains(value) {
+      return Some(value.to_string());
+    }
+  }
+  Some(
+    left
+      .split_whitespace()
+      .next()
+      .unwrap_or("unknown")
+      .to_string(),
+  )
+}
+
+fn normalize_color_symbols(colors: &[String]) -> Option<String> {
+  if colors.is_empty() {
+    return Some("c".to_string());
+  }
+  let mut out = String::new();
+  for symbol in ["W", "U", "B", "R", "G"] {
+    if colors.iter().any(|value| value.eq_ignore_ascii_case(symbol)) {
+      out.push_str(&symbol.to_lowercase());
+    }
+  }
+  if out.is_empty() {
+    Some("c".to_string())
+  } else {
+    Some(out)
+  }
+}
+
+fn sync_filter_tokens_for_profile(connection: &Connection, profile_id: &str) -> Result<i64, String> {
+  ensure_profile_exists(connection, profile_id)?;
+  let mut changed = 0_i64;
+  seed_default_filter_tokens(connection)?;
+
+  let mut set_stmt = connection
+    .prepare(
+      "SELECT DISTINCT lower(p.set_code)
+       FROM owned_items oi
+       JOIN printings p ON p.id = oi.printing_id
+       WHERE oi.profile_id = ?1
+         AND (oi.quantity > 0 OR oi.foil_quantity > 0)",
+    )
+    .map_err(|e| e.to_string())?;
+  let set_rows = set_stmt
+    .query_map(params![profile_id], |row| row.get::<usize, String>(0))
+    .map_err(|e| e.to_string())?;
+  for row in set_rows {
+    let code = row.map_err(|e| e.to_string())?;
+    if code.trim().is_empty() {
+      continue;
+    }
+    upsert_filter_token(
+      connection,
+      &format!("set:{}", code),
+      &format!("Set {}", code.to_uppercase()),
+      "set",
+      "derived",
+      50,
+    )?;
+    changed += 1;
+  }
+
+  let mut tag_stmt = connection
+    .prepare(
+      "SELECT DISTINCT lower(t.name), t.name
+       FROM tags t
+       WHERE t.profile_id = ?1
+       ORDER BY t.name COLLATE NOCASE",
+    )
+    .map_err(|e| e.to_string())?;
+  let tag_rows = tag_stmt
+    .query_map(params![profile_id], |row| Ok((row.get::<usize, String>(0)?, row.get::<usize, String>(1)?)))
+    .map_err(|e| e.to_string())?;
+  for row in tag_rows {
+    let (normalized, original) = row.map_err(|e| e.to_string())?;
+    upsert_filter_token(
+      connection,
+      &format!("tag:{}", normalized),
+      &format!("Tag {}", original),
+      "tag",
+      "derived",
+      55,
+    )?;
+    changed += 1;
+  }
+
+  let mut detail_stmt = connection
+    .prepare(
+      "SELECT DISTINCT c.type_line, c.color_identity_json, p.rarity, oi.language, oi.condition_code
+       FROM owned_items oi
+       JOIN printings p ON p.id = oi.printing_id
+       JOIN cards c ON c.id = p.card_id
+       WHERE oi.profile_id = ?1
+         AND (oi.quantity > 0 OR oi.foil_quantity > 0)",
+    )
+    .map_err(|e| e.to_string())?;
+  let detail_rows = detail_stmt
+    .query_map(params![profile_id], |row| {
+      Ok((
+        row.get::<usize, Option<String>>(0)?,
+        row.get::<usize, Option<String>>(1)?,
+        row.get::<usize, Option<String>>(2)?,
+        row.get::<usize, String>(3)?,
+        row.get::<usize, String>(4)?,
+      ))
+    })
+    .map_err(|e| e.to_string())?;
+  for row in detail_rows {
+    let (type_line, color_json, rarity, language, condition_code) = row.map_err(|e| e.to_string())?;
+    if let Some(primary_type) = extract_primary_type(type_line.as_deref()) {
+      upsert_filter_token(
+        connection,
+        &format!("t:{}", primary_type),
+        &format!("Type {}", primary_type),
+        "type",
+        "derived",
+        60,
+      )?;
+      changed += 1;
+    }
+    let colors = parse_color_identity_json(color_json);
+    if let Some(symbols) = normalize_color_symbols(&colors) {
+      upsert_filter_token(
+        connection,
+        &format!("c:{}", symbols),
+        &format!("Color {}", symbols.to_uppercase()),
+        "color",
+        "derived",
+        65,
+      )?;
+      changed += 1;
+    }
+    if let Some(rarity_value) = rarity {
+      let normalized = rarity_value.trim().to_lowercase();
+      if !normalized.is_empty() {
+        upsert_filter_token(
+          connection,
+          &format!("rarity:{}", normalized),
+          &format!("Rarity {}", normalized),
+          "rarity",
+          "derived",
+          70,
+        )?;
+        changed += 1;
+      }
+    }
+    let lang = language.trim().to_lowercase();
+    if !lang.is_empty() {
+      upsert_filter_token(
+        connection,
+        &format!("lang:{}", lang),
+        &format!("Language {}", lang.to_uppercase()),
+        "language",
+        "derived",
+        75,
+      )?;
+      changed += 1;
+    }
+    let condition = condition_code.trim().to_lowercase();
+    if !condition.is_empty() {
+      upsert_filter_token(
+        connection,
+        &format!("cond:{}", condition),
+        &format!("Condition {}", condition.to_uppercase()),
+        "condition",
+        "derived",
+        80,
+      )?;
+      changed += 1;
+    }
+  }
+
+  Ok(changed)
+}
+
 fn load_collection_rows(connection: &Connection, profile_id: &str) -> Result<Vec<OwnedCardDto>, String> {
   let mut statement = connection
     .prepare(
@@ -866,6 +1218,10 @@ fn load_collection_rows(connection: &Connection, profile_id: &str) -> Result<Vec
          p.set_code,
          p.collector_number,
          p.image_normal_url,
+         c.type_line,
+         c.color_identity_json,
+         c.cmc,
+         p.rarity,
          oi.quantity,
          oi.foil_quantity,
          oi.updated_at,
@@ -894,15 +1250,19 @@ fn load_collection_rows(connection: &Connection, profile_id: &str) -> Result<Vec
         row.get::<usize, String>(3)?,
         row.get::<usize, String>(4)?,
         row.get::<usize, Option<String>>(5)?,
-        row.get::<usize, i64>(6)?,
-        row.get::<usize, i64>(7)?,
-        row.get::<usize, String>(8)?,
-        row.get::<usize, String>(9)?,
-        row.get::<usize, String>(10)?,
-        row.get::<usize, Option<String>>(11)?,
-        row.get::<usize, Option<String>>(12)?,
-        row.get::<usize, Option<f64>>(13)?,
-        row.get::<usize, Option<String>>(14)?,
+        row.get::<usize, Option<String>>(6)?,
+        row.get::<usize, Option<String>>(7)?,
+        row.get::<usize, Option<f64>>(8)?,
+        row.get::<usize, Option<String>>(9)?,
+        row.get::<usize, i64>(10)?,
+        row.get::<usize, i64>(11)?,
+        row.get::<usize, String>(12)?,
+        row.get::<usize, String>(13)?,
+        row.get::<usize, String>(14)?,
+        row.get::<usize, Option<String>>(15)?,
+        row.get::<usize, Option<String>>(16)?,
+        row.get::<usize, Option<f64>>(17)?,
+        row.get::<usize, Option<String>>(18)?,
       ))
     })
     .map_err(|e| e.to_string())?;
@@ -916,6 +1276,10 @@ fn load_collection_rows(connection: &Connection, profile_id: &str) -> Result<Vec
       set_code,
       collector_number,
       image_url,
+      type_line,
+      color_identity_json,
+      mana_value,
+      rarity,
       quantity,
       foil_quantity,
       updated_at,
@@ -937,6 +1301,10 @@ fn load_collection_rows(connection: &Connection, profile_id: &str) -> Result<Vec
       set_code,
       collector_number,
       image_url,
+      type_line,
+      color_identity: parse_color_identity_json(color_identity_json),
+      mana_value,
+      rarity,
       quantity,
       foil_quantity,
       updated_at,
@@ -1050,6 +1418,10 @@ fn add_card_to_collection(
     &input.set_code,
     &input.collector_number,
     input.image_url.as_deref(),
+    input.type_line.as_deref(),
+    input.color_identity.as_deref(),
+    input.mana_value,
+    input.rarity.as_deref(),
   )?;
 
   let existing: Option<(String, i64, i64)> = connection
@@ -1121,6 +1493,7 @@ fn add_card_to_collection(
     maybe_insert_market_snapshot(&connection, &input.scryfall_id, price, "scryfall", "market")?;
   }
 
+  sync_filter_tokens_for_profile(&connection, &input.profile_id)?;
   load_collection_rows(&connection, &input.profile_id)
 }
 
@@ -1174,6 +1547,7 @@ fn update_card_quantity(
     }
   }
 
+  sync_filter_tokens_for_profile(&connection, &input.profile_id)?;
   load_collection_rows(&connection, &input.profile_id)
 }
 
@@ -1192,6 +1566,7 @@ fn remove_card_from_collection(
     )
     .map_err(|e| e.to_string())?;
 
+  sync_filter_tokens_for_profile(&connection, &input.profile_id)?;
   load_collection_rows(&connection, &input.profile_id)
 }
 
@@ -1219,6 +1594,10 @@ fn import_collection_rows(
         &row.set_code,
         &row.collector_number,
         row.image_url.as_deref(),
+        row.type_line.as_deref(),
+        row.color_identity.as_deref(),
+        row.mana_value,
+        row.rarity.as_deref(),
       )?;
 
       let existing: Option<(String, i64, i64)> = tx
@@ -1281,6 +1660,7 @@ fn import_collection_rows(
     tx.commit().map_err(|e| e.to_string())?;
   }
 
+  sync_filter_tokens_for_profile(&connection, &input.profile_id)?;
   load_collection_rows(&connection, &input.profile_id)
 }
 
@@ -1342,6 +1722,7 @@ fn bulk_update_tags(
     tx.commit().map_err(|e| e.to_string())?;
   }
 
+  sync_filter_tokens_for_profile(&connection, &input.profile_id)?;
   load_collection_rows(&connection, &input.profile_id)
 }
 
@@ -1447,6 +1828,7 @@ fn update_owned_card_metadata(
     )
     .map_err(|e| e.to_string())?;
 
+  sync_filter_tokens_for_profile(&connection, &input.profile_id)?;
   load_collection_rows(&connection, &input.profile_id)
 }
 
@@ -1468,6 +1850,7 @@ fn set_owned_card_state(
         params![&input.profile_id, &input.card.scryfall_id],
       )
       .map_err(|e| e.to_string())?;
+    sync_filter_tokens_for_profile(&connection, &input.profile_id)?;
     return load_collection_rows(&connection, &input.profile_id);
   }
 
@@ -1478,6 +1861,10 @@ fn set_owned_card_state(
     &input.card.set_code,
     &input.card.collector_number,
     input.card.image_url.as_deref(),
+    input.card.type_line.as_deref(),
+    input.card.color_identity.as_deref(),
+    input.card.mana_value,
+    input.card.rarity.as_deref(),
   )?;
 
   let existing_owned_item_id: Option<String> = connection
@@ -1612,6 +1999,7 @@ fn set_owned_card_state(
   let normalized_tags = derive_tags(quantity, foil_quantity, input.card.tags.clone());
   upsert_tags_for_owned_item(&connection, &input.profile_id, &owned_item_id, &normalized_tags)?;
 
+  sync_filter_tokens_for_profile(&connection, &input.profile_id)?;
   load_collection_rows(&connection, &input.profile_id)
 }
 
@@ -1876,6 +2264,63 @@ fn optimize_catalog_storage(
 }
 
 #[tauri::command]
+fn sync_filter_tokens(
+  state: State<'_, AppState>,
+  profile_id: String,
+) -> Result<i64, String> {
+  let connection = open_database(&state.db_path)?;
+  sync_filter_tokens_for_profile(&connection, &profile_id)
+}
+
+#[tauri::command]
+fn get_filter_tokens(
+  state: State<'_, AppState>,
+  input: Option<FilterTokenQueryInput>,
+) -> Result<Vec<FilterTokenDto>, String> {
+  let connection = open_database(&state.db_path)?;
+  seed_default_filter_tokens(&connection)?;
+  let query = input
+    .as_ref()
+    .and_then(|value| value.query.as_ref())
+    .map(|value| value.trim().to_lowercase())
+    .unwrap_or_default();
+  let limit = input
+    .as_ref()
+    .and_then(|value| value.limit)
+    .unwrap_or(FILTER_TOKEN_DEFAULT_LIMIT)
+    .clamp(1, 100);
+  let like = format!("%{}%", query);
+
+  let mut statement = connection
+    .prepare(
+      "SELECT token, label, kind, source, priority
+       FROM filter_tokens
+       WHERE ?1 = '' OR token LIKE ?2 COLLATE NOCASE OR label LIKE ?2 COLLATE NOCASE
+       ORDER BY priority ASC, token COLLATE NOCASE
+       LIMIT ?3",
+    )
+    .map_err(|e| e.to_string())?;
+
+  let rows = statement
+    .query_map(params![query, like, limit], |row| {
+      Ok(FilterTokenDto {
+        token: row.get(0)?,
+        label: row.get(1)?,
+        kind: row.get(2)?,
+        source: row.get(3)?,
+        priority: row.get(4)?,
+      })
+    })
+    .map_err(|e| e.to_string())?;
+
+  let mut tokens = Vec::new();
+  for row in rows {
+    tokens.push(row.map_err(|e| e.to_string())?);
+  }
+  Ok(tokens)
+}
+
+#[tauri::command]
 fn record_market_snapshots(
   state: State<'_, AppState>,
   snapshots: Vec<MarketSnapshotInput>,
@@ -1890,6 +2335,10 @@ fn record_market_snapshots(
       &snapshot.set_code,
       &snapshot.collector_number,
       snapshot.image_url.as_deref(),
+      None,
+      None,
+      None,
+      None,
     )?;
 
     if let Some(price) = snapshot.market_price {
@@ -2047,6 +2496,8 @@ pub fn run() {
       apply_catalog_patch,
       reset_catalog_sync_state_for_test,
       optimize_catalog_storage,
+      sync_filter_tokens,
+      get_filter_tokens,
       record_market_snapshots,
       get_market_price_trends,
       get_ck_buylist_quotes

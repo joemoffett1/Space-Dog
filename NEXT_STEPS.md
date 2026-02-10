@@ -26,6 +26,81 @@ Deliver a fast, reliable Windows desktop app that can:
 6. Market tab with Scryfall-driven add flow.
 7. Sync diagnostics/progress + patch engine wiring.
 8. CK buylist public ingestion path (desktop backend).
+9. UI refresh pass 1 completed:
+- grouped collection toolbar
+- search token autocomplete
+- token chips
+- row density controls
+- text-row mini art thumbnails
+
+## UI Mockup Alignment Audit (New)
+Target reference: the space-themed mockup style and interaction model discussed in chat.
+
+Estimated UI elements to update for closer parity: `27` total.
+
+Current status roll-up:
+1. Done: `27 / 27`
+2. In Progress / Partial: `0 / 27`
+3. Planned / Not Started: `0 / 27`
+
+Status key:
+1. `[x]` done
+2. `[-]` in progress / partial
+3. `[ ]` planned
+
+### Group A: Global Shell and Navigation (5)
+1. `[x]` Header brand lockup (logo/title/subtitle spacing and scale).
+2. `[x]` Primary nav treatment (Collection/Market/Reports/Settings visual language).
+3. `[x]` Header right utility cluster (sync state, refresh, profile/avatar grouping).
+4. `[x]` Top-level panel framing (outer glow/border rhythm and spacing consistency).
+5. `[x]` Shared button system polish (size scale + icon/text pairing across all primary actions).
+
+### Group B: Collection Toolbar and Search UX (6)
+1. `[x]` View-mode control bar visual style (table/image/filter grouping feel).
+2. `[x]` Search field shell with richer syntax/tag autosuggest styling.
+3. `[x]` Active filter/token chip presentation (color coding by token kind).
+4. `[x]` Quick-filter controls (type/set/color shortcuts as first-class pills/dropdowns).
+5. `[x]` Sort/source control visual hierarchy (price source + sort alignment).
+6. `[x]` Secondary action row (`Add`, `Import`, `Export`, overflow menu) style unification.
+
+### Group C: Table and Dense Data Readability (6)
+1. `[x]` Column header typography and separators (less blocky, higher contrast legibility).
+2. `[x]` Row density typography tuning (line-height, numeric alignment, sticky affordances).
+3. `[x]` Card identity cell composition (thumbnail, title, metadata stack balance).
+4. `[x]` Price/trend cell treatment (compact trend badges and directional indicators).
+5. `[x]` Actions cluster ergonomics (`+/-`, foil toggle, edit/remove spacing and consistency).
+6. `[x]` Table footer/status strip (results count, pagination/load strategy visuals).
+
+### Group D: Image/Gallery View Polish (4)
+1. `[x]` Card tile framing, hover states, and shadow depth consistency.
+2. `[x]` Overlay badges for owned/foil/tags with clearer priority.
+3. `[x]` Inline quantity/action controls on card edges (visibility and hit area tuning).
+4. `[x]` Gallery density + spacing rhythm to match the sleeker mockup aesthetic.
+
+### Group E: Modal / Submenu Flow (4)
+1. `[x]` Multi-step header treatment (`Add Card -> Versions`) with clearer progress state.
+2. `[x]` Modal content layout proportions (left/right emphasis and whitespace).
+3. `[x]` Search/add results card presentation consistency with main collection style.
+4. `[x]` Versions view visual distinction for owned vs unowned printings (contrast/tone system).
+
+### Group F: Visual Effects and Micro-Interactions (2)
+1. `[x]` Motion pass (subtle transitions, hover, and focus states across controls).
+2. `[x]` Scrollbars, focus rings, and accessibility affordances themed to match visual language.
+
+## UI Implementation Plan (Next)
+1. UI Batch 1: Global shell + toolbar + search polish (Groups A+B). `Completed`
+2. UI Batch 2: Table readability + compact-mode refinement (Group C). `Completed`
+3. UI Batch 3: Gallery polish + modal flow upgrade (Groups D+E). `Completed`
+4. UI Batch 4: Motion/accessibility/final visual QA (Group F + regression sweep). `Completed`
+5. Remaining UI delta:
+- none in the current 27-item mockup alignment batch.
+
+## UI QA Checklist (Per Batch)
+1. Desktop resolutions: 1366x768, 1920x1080, ultrawide sanity check.
+2. Interaction checks: keyboard navigation, focus visibility, hover states.
+3. Large collection perf checks (10k+ rows): scroll, filter, tab switch.
+4. Visual consistency checks: button sizing, spacing scale, typography rhythm.
+5. Accessibility pass: contrast and hit-targets for dense controls.
 
 ## Reprioritized Work Plan (Local-Only)
 

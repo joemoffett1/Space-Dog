@@ -26,6 +26,10 @@ export interface OwnedCard {
   setCode: string
   collectorNumber: string
   imageUrl?: string
+  typeLine?: string | null
+  colorIdentity?: string[]
+  manaValue?: number | null
+  rarity?: string | null
   quantity: number
   foilQuantity: number
   updatedAt: string
@@ -52,6 +56,10 @@ export interface AddCardInput {
   setCode: string
   collectorNumber: string
   imageUrl?: string
+  typeLine?: string | null
+  colorIdentity?: string[]
+  manaValue?: number | null
+  rarity?: string | null
   foil: boolean
   currentPrice?: number | null
   tags?: string[]
@@ -63,6 +71,10 @@ export interface MarketCard {
   setCode: string
   collectorNumber: string
   imageUrl?: string
+  typeLine?: string | null
+  colorIdentity?: string[]
+  manaValue?: number | null
+  rarity?: string | null
   currentPrice: number | null
   previousPrice: number | null
   priceDelta: number | null
@@ -94,6 +106,10 @@ export interface CollectionImportRow {
   name: string
   setCode: string
   collectorNumber: string
+  typeLine?: string | null
+  colorIdentity?: string[]
+  manaValue?: number | null
+  rarity?: string | null
   quantity: number
   foilQuantity: number
   tags?: string[]
@@ -121,4 +137,12 @@ export interface UpdateOwnedCardMetadataInput {
   notes?: string
   purchasePrice?: number | null
   dateAdded?: string
+}
+
+export interface FilterToken {
+  token: string
+  label: string
+  kind: string
+  source: string
+  priority: number
 }

@@ -4,6 +4,7 @@ import type {
   AddCardInput,
   BulkTagRequest,
   CollectionImportRow,
+  FilterToken,
   MarketSnapshotInput,
   MarketTrend,
   OwnedCard,
@@ -121,6 +122,13 @@ function normalizeCollectionCard(
     setCode: input.setCode,
     collectorNumber: input.collectorNumber,
     imageUrl: input.imageUrl,
+    typeLine: input.typeLine ?? null,
+    colorIdentity: Array.isArray(input.colorIdentity) ? [...input.colorIdentity] : [],
+    manaValue:
+      typeof input.manaValue === 'number' && Number.isFinite(input.manaValue)
+        ? input.manaValue
+        : null,
+    rarity: input.rarity ?? null,
     quantity,
     foilQuantity,
     updatedAt: input.updatedAt ?? nowIso(),
@@ -199,6 +207,13 @@ async function fallbackAddCardToCollection(input: AddCardInput): Promise<OwnedCa
     setCode: existing?.setCode ?? input.setCode,
     collectorNumber: existing?.collectorNumber ?? input.collectorNumber,
     imageUrl: existing?.imageUrl ?? input.imageUrl,
+    typeLine: existing?.typeLine ?? input.typeLine ?? null,
+    colorIdentity:
+      existing?.colorIdentity && existing.colorIdentity.length
+        ? existing.colorIdentity
+        : input.colorIdentity ?? [],
+    manaValue: existing?.manaValue ?? input.manaValue ?? null,
+    rarity: existing?.rarity ?? input.rarity ?? null,
     quantity: existing?.quantity ?? 0,
     foilQuantity: existing?.foilQuantity ?? 0,
     updatedAt: nowIso(),
@@ -280,6 +295,13 @@ async function fallbackImportCollectionRows(input: {
       setCode: existing?.setCode ?? row.setCode,
       collectorNumber: existing?.collectorNumber ?? row.collectorNumber,
       imageUrl: existing?.imageUrl,
+      typeLine: existing?.typeLine ?? row.typeLine ?? null,
+      colorIdentity:
+        existing?.colorIdentity && existing.colorIdentity.length
+          ? existing.colorIdentity
+          : row.colorIdentity ?? [],
+      manaValue: existing?.manaValue ?? row.manaValue ?? null,
+      rarity: existing?.rarity ?? row.rarity ?? null,
       quantity: Math.max(0, (existing?.quantity ?? 0) + row.quantity),
       foilQuantity: Math.max(0, (existing?.foilQuantity ?? 0) + row.foilQuantity),
       tags: [...new Set([...(existing?.tags ?? []), ...(row.tags ?? [])])],
@@ -393,6 +415,10 @@ async function fallbackSetOwnedCardState(input: {
     quantity: Math.max(0, Math.floor(input.card.quantity)),
     foilQuantity: Math.max(0, Math.floor(input.card.foilQuantity)),
     tags: [...input.card.tags],
+    typeLine: input.card.typeLine ?? null,
+    colorIdentity: [...(input.card.colorIdentity ?? [])],
+    manaValue: input.card.manaValue ?? null,
+    rarity: input.card.rarity ?? null,
     updatedAt: nowIso(),
   })
 
@@ -526,4 +552,87 @@ export async function setOwnedCardState(input: {
 
 export function asCardMap(cards: OwnedCard[]): OwnedCardMap {
   return toCardMap(cards)
+}
+
+function fallbackFilterTokens(query: string, limit = 30): FilterToken[] {
+  const normalizedQuery = query.trim().toLowerCase()
+  const allCollections = loadProfiles().flatMap((profile) =>
+    Object.values(loadCollection(profile.id)),
+  )
+  const tokens = new Map<string, FilterToken>()
+
+  const seed = [
+    ['set:', 'Set code (example: set:neo)', 'scryfall'],
+    ['t:', 'Type line (example: t:creature)', 'scryfall'],
+    ['tag:', 'Internal tag (example: tag:owned)', 'internal'],
+    ['c:', 'Color identity (example: c:uw)', 'scryfall'],
+    ['id:', 'Color identity exact-ish (example: id:g)', 'scryfall'],
+    ['rarity:', 'Rarity (example: rarity:rare)', 'scryfall'],
+    ['mv>=', 'Mana value compare (example: mv>=3)', 'scryfall'],
+    ['lang:', 'Language (example: lang:en)', 'internal'],
+    ['cond:', 'Condition (example: cond:nm)', 'internal'],
+    ['is:foil', 'Foil printings', 'scryfall'],
+    ['is:nonfoil', 'Nonfoil printings', 'scryfall'],
+  ] as const
+
+  seed.forEach(([token, label, kind], index) => {
+    tokens.set(`${kind}:${token}`, {
+      token,
+      label,
+      kind,
+      source: 'seed',
+      priority: index + 1,
+    })
+  })
+
+  allCollections.forEach((card) => {
+    tokens.set(`set:${card.setCode.toLowerCase()}`, {
+      token: `set:${card.setCode.toLowerCase()}`,
+      label: `Set ${card.setCode.toUpperCase()}`,
+      kind: 'set',
+      source: 'derived',
+      priority: 50,
+    })
+    card.tags.forEach((tag) => {
+      const normalizedTag = tag.trim().toLowerCase()
+      if (!normalizedTag) return
+      tokens.set(`tag:${normalizedTag}`, {
+        token: `tag:${normalizedTag}`,
+        label: `Tag ${tag.trim()}`,
+        kind: 'tag',
+        source: 'derived',
+        priority: 60,
+      })
+    })
+  })
+
+  return [...tokens.values()]
+    .filter((token) => {
+      if (!normalizedQuery) return true
+      return (
+        token.token.toLowerCase().includes(normalizedQuery) ||
+        token.label.toLowerCase().includes(normalizedQuery)
+      )
+    })
+    .sort((a, b) => a.priority - b.priority || a.token.localeCompare(b.token))
+    .slice(0, Math.max(1, limit))
+}
+
+export async function syncFilterTokens(profileId: string): Promise<number> {
+  if (!hasTauriRuntime()) {
+    return fallbackFilterTokens('', 200).length
+  }
+  return invoke<number>('sync_filter_tokens', { profileId })
+}
+
+export async function getFilterTokens(
+  query: string,
+  limit = 30,
+): Promise<FilterToken[]> {
+  if (!hasTauriRuntime()) {
+    return fallbackFilterTokens(query, limit)
+  }
+  return invoke<FilterToken[]>('get_filter_tokens', {
+    input: { query, limit },
+  })
 }

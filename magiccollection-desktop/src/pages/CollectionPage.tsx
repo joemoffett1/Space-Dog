@@ -1,14 +1,30 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, UIEvent } from 'react'
-import type { OwnedCard, PriceDirection, UpdateOwnedCardMetadataInput } from '../types'
+import type { ChangeEvent, KeyboardEvent, UIEvent } from 'react'
+import { createPortal } from 'react-dom'
+import { getFilterTokens, syncFilterTokens } from '../lib/backend'
+import type {
+  AddCardInput,
+  FilterToken,
+  OwnedCard,
+  PriceDirection,
+  UpdateOwnedCardMetadataInput,
+} from '../types'
 
-type CollectionViewMode = 'text' | 'image' | 'compact'
+type CollectionViewMode = 'text' | 'image'
+type FinishFilter = 'all' | 'any-foil' | 'nonfoil-only'
+type RowDensity = 'comfortable' | 'balanced' | 'dense'
+type SortMode = 'qty-desc' | 'name-asc' | 'price-desc' | 'set-asc' | 'updated-desc'
+type TextColumnId = 'set' | 'number' | 'tags' | 'price' | 'trend'
+type TextColumnState = Record<TextColumnId, boolean>
+type CollectionModalMode = 'versions' | 'add'
 
 interface CollectionPageProps {
+  profileId: string
   profileName: string
   cards: OwnedCard[]
   onIncrement: (cardId: string, foil: boolean) => Promise<void>
   onDecrement: (cardId: string, foil: boolean) => Promise<void>
+  onAddPrinting: (input: Omit<AddCardInput, 'profileId'>) => Promise<void>
   onRemove: (cardId: string) => Promise<void>
   onTagCard: (cardId: string, tag: string) => Promise<void>
   onUpdateMetadata: (
@@ -41,13 +57,80 @@ interface VersionRow {
   ownedFoilQuantity: number
 }
 
+interface AddMenuCard {
+  scryfallId: string
+  name: string
+  setCode: string
+  collectorNumber: string
+  releasedAt: string | null
+  imageUrl: string | null
+  typeLine: string | null
+  colorIdentity: string[]
+  manaValue: number | null
+  rarity: string | null
+  marketPrice: number | null
+}
+
+interface ManaComparator {
+  op: '<' | '<=' | '=' | '>=' | '>'
+  value: number
+}
+
+interface ParsedSearchPlan {
+  freeText: string[]
+  setCodes: string[]
+  typeTerms: string[]
+  tags: string[]
+  colorContains: string[]
+  colorExact: string | null
+  rarities: string[]
+  languages: string[]
+  conditions: string[]
+  foilMode: 'any' | 'foil' | 'nonfoil'
+  manaComparators: ManaComparator[]
+}
+
+interface SearchTermBox {
+  token: string
+  kind: string
+}
+
 const VIRTUAL_HEIGHT = 560
-const TEXT_ROW_HEIGHT = 46
-const COMPACT_ROW_HEIGHT = 44
 const OVERSCAN = 12
 const IMAGE_PAGE_SIZE = 140
 const CONDITION_OPTIONS = ['NM', 'LP', 'MP', 'HP', 'DMG']
 const LANGUAGE_OPTIONS = ['en', 'jp', 'de', 'fr', 'it', 'es', 'pt', 'ko', 'ru', 'zhs', 'zht']
+const COLOR_SYMBOLS = ['W', 'U', 'B', 'R', 'G']
+const ADD_RESULT_LIMIT = 80
+const TEXT_COLUMNS: Array<{ id: TextColumnId; label: string }> = [
+  { id: 'set', label: 'Set' },
+  { id: 'number', label: '#' },
+  { id: 'tags', label: 'Tags' },
+  { id: 'price', label: 'Price' },
+  { id: 'trend', label: 'Trend' },
+]
+const DENSITY_ROW_HEIGHT: Record<RowDensity, number> = {
+  comfortable: 54,
+  balanced: 46,
+  dense: 38,
+}
+const DENSITY_IMAGE_MIN_WIDTH: Record<RowDensity, number> = {
+  comfortable: 182,
+  balanced: 170,
+  dense: 158,
+}
+const PRICE_SOURCE_OPTIONS = [
+  { id: 'scryfall-market', label: 'Scryfall Market' },
+  { id: 'ck-buylist', label: 'CK Buylist (soon)' },
+  { id: 'multi-source', label: 'Multi-source (soon)' },
+] as const
+const SORT_MODE_LABELS: Record<SortMode, string> = {
+  'qty-desc': 'Quantity',
+  'name-asc': 'Name',
+  'price-desc': 'Price',
+  'set-asc': 'Set',
+  'updated-desc': 'Updated',
+}
 
 function formatUsd(value: number | null): string {
   if (value === null || !Number.isFinite(value)) {
@@ -80,6 +163,39 @@ function normalize(value: string): string {
   return value.trim().toLowerCase()
 }
 
+function colorIdentityLabel(colors: string[] | undefined): string {
+  if (!colors || colors.length === 0) {
+    return 'C'
+  }
+  return COLOR_SYMBOLS.filter((symbol) => colors.includes(symbol)).join('')
+}
+
+function inferPrimaryType(typeLine: string | null | undefined): string {
+  const normalized = (typeLine ?? '').trim().toLowerCase()
+  if (!normalized) {
+    return 'unknown'
+  }
+  const [left] = normalized.split('—')
+  const typePart = left.trim()
+  const known = [
+    'artifact',
+    'battle',
+    'creature',
+    'enchantment',
+    'instant',
+    'land',
+    'planeswalker',
+    'sorcery',
+    'tribal',
+  ]
+  for (const value of known) {
+    if (typePart.includes(value)) {
+      return value
+    }
+  }
+  return typePart.split(/\s+/)[0] ?? 'unknown'
+}
+
 function formatDate(value: string | null): string {
   if (!value) {
     return 'Unknown'
@@ -95,6 +211,322 @@ function fallbackScryfallImageUrl(scryfallId: string): string {
   return `https://api.scryfall.com/cards/${encodeURIComponent(
     scryfallId,
   )}?format=image&version=normal`
+}
+
+function resolveCardImageUrl(imageUrl: string | null | undefined, scryfallId: string): string | null {
+  if (imageUrl && imageUrl.trim()) {
+    return imageUrl
+  }
+  const normalized = scryfallId.trim()
+  if (!normalized) {
+    return null
+  }
+  return fallbackScryfallImageUrl(normalized)
+}
+
+function tokenizeSearchInput(value: string): string[] {
+  const matches = value.match(/"[^"]+"|\S+/g)
+  if (!matches) {
+    return []
+  }
+  return matches.map((part) => {
+    const trimmed = part.trim()
+    if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+      return trimmed.slice(1, -1)
+    }
+    return trimmed
+  })
+}
+
+function parseSearchPlan(rawSearch: string): ParsedSearchPlan {
+  const plan: ParsedSearchPlan = {
+    freeText: [],
+    setCodes: [],
+    typeTerms: [],
+    tags: [],
+    colorContains: [],
+    colorExact: null,
+    rarities: [],
+    languages: [],
+    conditions: [],
+    foilMode: 'any',
+    manaComparators: [],
+  }
+  const terms = tokenizeSearchInput(rawSearch)
+  for (const rawTerm of terms) {
+    const term = rawTerm.trim().toLowerCase()
+    if (!term) {
+      continue
+    }
+    if (term.startsWith('set:')) {
+      const value = term.slice(4).trim()
+      if (value) {
+        plan.setCodes.push(value.toUpperCase())
+      }
+      continue
+    }
+    if (term.startsWith('t:') || term.startsWith('type:')) {
+      const value = term.startsWith('type:') ? term.slice(5) : term.slice(2)
+      if (value.trim()) {
+        plan.typeTerms.push(value.trim())
+      }
+      continue
+    }
+    if (term.startsWith('tag:')) {
+      const value = term.slice(4).trim()
+      if (value) {
+        plan.tags.push(value)
+      }
+      continue
+    }
+    if (term.startsWith('c:')) {
+      const value = term
+        .slice(2)
+        .toUpperCase()
+        .replace(/[^WUBRGC]/g, '')
+      if (value) {
+        plan.colorContains.push(value)
+      }
+      continue
+    }
+    if (term.startsWith('id:')) {
+      const value = term
+        .slice(3)
+        .toUpperCase()
+        .replace(/[^WUBRGC]/g, '')
+      if (value) {
+        plan.colorExact = value
+      }
+      continue
+    }
+    if (term.startsWith('rarity:')) {
+      const value = term.slice(7).trim()
+      if (value) {
+        plan.rarities.push(value)
+      }
+      continue
+    }
+    if (term.startsWith('lang:')) {
+      const value = term.slice(5).trim()
+      if (value) {
+        plan.languages.push(value)
+      }
+      continue
+    }
+    if (term.startsWith('cond:')) {
+      const value = term.slice(5).trim()
+      if (value) {
+        plan.conditions.push(value.toUpperCase())
+      }
+      continue
+    }
+    if (term === 'is:foil') {
+      plan.foilMode = 'foil'
+      continue
+    }
+    if (term === 'is:nonfoil') {
+      plan.foilMode = 'nonfoil'
+      continue
+    }
+    const manaMatch = term.match(/^mv(<=|>=|=|:|<|>)(\d+(?:\.\d+)?)$/)
+    if (manaMatch) {
+      const parsed = Number(manaMatch[2])
+      if (Number.isFinite(parsed)) {
+        plan.manaComparators.push({
+          op: manaMatch[1] === ':' ? '=' : (manaMatch[1] as ManaComparator['op']),
+          value: parsed,
+        })
+      }
+      continue
+    }
+    const nameTerm = term.startsWith('name:') ? term.slice(5).trim() : term
+    if (nameTerm) {
+      plan.freeText.push(nameTerm)
+    }
+  }
+  return plan
+}
+
+function compareMana(left: number, comparator: ManaComparator): boolean {
+  if (comparator.op === '<') {
+    return left < comparator.value
+  }
+  if (comparator.op === '<=') {
+    return left <= comparator.value
+  }
+  if (comparator.op === '>') {
+    return left > comparator.value
+  }
+  if (comparator.op === '>=') {
+    return left >= comparator.value
+  }
+  return left === comparator.value
+}
+
+function matchesSearchPlan(card: OwnedCard, plan: ParsedSearchPlan): boolean {
+  const typeName = inferPrimaryType(card.typeLine)
+  const normalizedTypeLine = normalize(card.typeLine ?? '')
+  const colorLabel = colorIdentityLabel(card.colorIdentity)
+  const cardTagsNormalized = card.tags.map((tag) => normalize(tag))
+  const searchable = [
+    card.name,
+    card.setCode,
+    card.collectorNumber,
+    typeName,
+    colorLabel,
+    ...card.tags,
+  ]
+    .join(' ')
+    .toLowerCase()
+
+  if (
+    plan.freeText.length > 0 &&
+    !plan.freeText.every((term) => searchable.includes(term))
+  ) {
+    return false
+  }
+  if (
+    plan.setCodes.length > 0 &&
+    !plan.setCodes.some((setCode) => setCode === card.setCode.toUpperCase())
+  ) {
+    return false
+  }
+  if (
+    plan.typeTerms.length > 0 &&
+    !plan.typeTerms.every(
+      (term) =>
+        normalize(typeName).includes(term) ||
+        normalizedTypeLine.includes(term) ||
+        cardTagsNormalized.some((tag) => tag.includes(term)),
+    )
+  ) {
+    return false
+  }
+  if (
+    plan.tags.length > 0 &&
+    !plan.tags.every((tag) => cardTagsNormalized.some((ownedTag) => ownedTag.includes(tag)))
+  ) {
+    return false
+  }
+
+  const normalizedIdentity = colorIdentityLabel(card.colorIdentity).toUpperCase()
+  if (plan.colorContains.length > 0) {
+    const identitySet = new Set(normalizedIdentity.split('').filter(Boolean))
+    for (const target of plan.colorContains) {
+      const symbols = target.split('').filter(Boolean)
+      if (symbols.includes('C') && identitySet.size !== 0) {
+        return false
+      }
+      if (!symbols.every((symbol) => identitySet.has(symbol))) {
+        return false
+      }
+    }
+  }
+  if (plan.colorExact) {
+    if (plan.colorExact === 'C') {
+      if (normalizedIdentity !== 'C') {
+        return false
+      }
+    } else {
+      const exact = plan.colorExact
+        .split('')
+        .filter(Boolean)
+        .sort()
+        .join('')
+      const cardIdentity = normalizedIdentity
+        .split('')
+        .filter((value) => value !== 'C')
+        .sort()
+        .join('')
+      if (exact !== cardIdentity) {
+        return false
+      }
+    }
+  }
+  if (
+    plan.rarities.length > 0 &&
+    !plan.rarities.includes((card.rarity ?? '').toLowerCase())
+  ) {
+    return false
+  }
+  if (
+    plan.languages.length > 0 &&
+    !plan.languages.includes(card.language.toLowerCase())
+  ) {
+    return false
+  }
+  if (
+    plan.conditions.length > 0 &&
+    !plan.conditions.includes(card.conditionCode.toUpperCase())
+  ) {
+    return false
+  }
+  if (plan.foilMode === 'foil' && card.foilQuantity <= 0) {
+    return false
+  }
+  if (plan.foilMode === 'nonfoil' && card.quantity <= 0) {
+    return false
+  }
+  if (plan.manaComparators.length > 0) {
+    if (card.manaValue === null || card.manaValue === undefined) {
+      return false
+    }
+    if (!plan.manaComparators.every((comparator) => compareMana(card.manaValue ?? 0, comparator))) {
+      return false
+    }
+  }
+  return true
+}
+
+function inferTokenKind(token: string): string {
+  const normalized = token.trim().toLowerCase()
+  if (normalized.startsWith('set:')) return 'set'
+  if (normalized.startsWith('tag:')) return 'tag'
+  if (normalized.startsWith('t:') || normalized.startsWith('type:')) return 'type'
+  if (normalized.startsWith('c:') || normalized.startsWith('id:')) return 'color'
+  if (normalized.startsWith('mv') || normalized.startsWith('mana:')) return 'mana'
+  if (normalized.startsWith('rarity:')) return 'rarity'
+  if (normalized.startsWith('lang:')) return 'language'
+  if (normalized.startsWith('cond:')) return 'condition'
+  if (normalized.startsWith('is:')) return 'state'
+  return 'generic'
+}
+
+function normalizeSearchTerms(terms: string[]): string[] {
+  return terms.map((term) => term.trim()).filter((term) => term.length > 0)
+}
+
+function getSearchTermBoxes(terms: string[]): SearchTermBox[] {
+  return normalizeSearchTerms(terms).map((term) => ({
+    token: term,
+    kind: inferTokenKind(term),
+  }))
+}
+
+function CardArtImage({
+  src,
+  alt,
+  className,
+}: {
+  src: string | null
+  alt: string
+  className?: string
+}) {
+  const [failed, setFailed] = useState(false)
+
+  if (!src || failed) {
+    return <div className={`image-fallback ${className ?? ''}`}>{alt.slice(0, 1).toUpperCase()}</div>
+  }
+
+  return <img src={src} alt={alt} className={className} loading="lazy" onError={() => setFailed(true)} />
+}
+
+function parseUsd(value: string | null | undefined): number | null {
+  if (!value) {
+    return null
+  }
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : null
 }
 
 async function fetchVersionsForCard(
@@ -151,11 +583,70 @@ async function fetchVersionsForCard(
     })
 }
 
+async function searchCardsForAddMenu(query: string): Promise<AddMenuCard[]> {
+  const trimmed = query.trim()
+  if (!trimmed) {
+    return []
+  }
+  const url = `https://api.scryfall.com/cards/search?q=${encodeURIComponent(
+    trimmed,
+  )}&unique=prints&order=name&dir=asc`
+  const response = await fetch(url)
+  if (!response.ok) {
+    if (response.status === 404) {
+      return []
+    }
+    throw new Error(`Unable to search Scryfall (${response.status}).`)
+  }
+  const payload = (await response.json()) as {
+    data?: Array<{
+      id?: string
+      name?: string
+      set?: string
+      collector_number?: string
+      released_at?: string
+      type_line?: string
+      color_identity?: string[]
+      cmc?: number
+      rarity?: string
+      image_uris?: { normal?: string }
+      card_faces?: Array<{ image_uris?: { normal?: string } }>
+      prices?: { usd?: string | null; usd_foil?: string | null }
+    }>
+  }
+
+  return (payload.data ?? [])
+    .slice(0, ADD_RESULT_LIMIT)
+    .map((entry) => {
+      const scryfallId = entry.id ?? ''
+      if (!scryfallId) {
+        return null
+      }
+      return {
+        scryfallId,
+        name: entry.name ?? 'Unknown',
+        setCode: (entry.set ?? '').toUpperCase(),
+        collectorNumber: entry.collector_number ?? '',
+        releasedAt: entry.released_at ?? null,
+        imageUrl:
+          entry.image_uris?.normal ?? entry.card_faces?.[0]?.image_uris?.normal ?? null,
+        typeLine: entry.type_line ?? null,
+        colorIdentity: entry.color_identity ?? [],
+        manaValue: typeof entry.cmc === 'number' && Number.isFinite(entry.cmc) ? entry.cmc : null,
+        rarity: entry.rarity ?? null,
+        marketPrice: parseUsd(entry.prices?.usd ?? entry.prices?.usd_foil),
+      } as AddMenuCard
+    })
+    .filter((entry): entry is AddMenuCard => entry !== null)
+}
+
 export function CollectionPage({
+  profileId,
   profileName,
   cards,
   onIncrement,
   onDecrement,
+  onAddPrinting,
   onRemove,
   onTagCard,
   onUpdateMetadata,
@@ -170,13 +661,48 @@ export function CollectionPage({
   const [importMessage, setImportMessage] = useState('')
   const [importError, setImportError] = useState('')
   const [viewMode, setViewMode] = useState<CollectionViewMode>('text')
-  const [searchTerm, setSearchTerm] = useState('')
+  const [rowDensity, setRowDensity] = useState<RowDensity>('balanced')
+  const [compactMode, setCompactMode] = useState(false)
+  const [searchTerms, setSearchTerms] = useState<string[]>([])
+  const [searchDraft, setSearchDraft] = useState('')
+  const [activeSearchBoxIndex, setActiveSearchBoxIndex] = useState(-1)
+  const [searchHasFocus, setSearchHasFocus] = useState(false)
+  const [tokenSuggestions, setTokenSuggestions] = useState<FilterToken[]>([])
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0)
+  const [isSuggestionLoading, setIsSuggestionLoading] = useState(false)
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
+  const [finishFilter, setFinishFilter] = useState<FinishFilter>('all')
+  const [sortMode, setSortMode] = useState<SortMode>('qty-desc')
+  const [priceSource, setPriceSource] = useState<(typeof PRICE_SOURCE_OPTIONS)[number]['id']>(
+    'scryfall-market',
+  )
+  const [quickSetFilter, setQuickSetFilter] = useState('')
+  const [quickTypeFilter, setQuickTypeFilter] = useState('')
+  const [quickColorFilter, setQuickColorFilter] = useState('')
+  const [setFilters, setSetFilters] = useState<Set<string>>(new Set())
+  const [typeFilters, setTypeFilters] = useState<Set<string>>(new Set())
+  const [colorFilters, setColorFilters] = useState<Set<string>>(new Set())
+  const [tagFilters, setTagFilters] = useState<Set<string>>(new Set())
+  const [conditionFilters, setConditionFilters] = useState<Set<string>>(new Set())
+  const [languageFilters, setLanguageFilters] = useState<Set<string>>(new Set())
+  const [textColumnState, setTextColumnState] = useState<TextColumnState>({
+    set: true,
+    number: true,
+    tags: true,
+    price: true,
+    trend: true,
+  })
   const [listScrollTop, setListScrollTop] = useState(0)
   const [imageLimit, setImageLimit] = useState(IMAGE_PAGE_SIZE)
+  const [modalMode, setModalMode] = useState<CollectionModalMode | null>(null)
   const [versionAnchor, setVersionAnchor] = useState<OwnedCard | null>(null)
   const [versionRows, setVersionRows] = useState<VersionRow[]>([])
   const [isLoadingVersions, setIsLoadingVersions] = useState(false)
   const [versionError, setVersionError] = useState('')
+  const [addMenuQuery, setAddMenuQuery] = useState('')
+  const [addMenuResults, setAddMenuResults] = useState<AddMenuCard[]>([])
+  const [isSearchingAddMenu, setIsSearchingAddMenu] = useState(false)
+  const [addMenuError, setAddMenuError] = useState('')
   const [foilModeByCard, setFoilModeByCard] = useState<Record<string, boolean>>({})
   const [activeTagByCard, setActiveTagByCard] = useState<Record<string, string>>({})
   const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(new Set())
@@ -194,6 +720,9 @@ export function CollectionPage({
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
+  const searchTokenInputRefs = useRef<Array<HTMLInputElement | null>>([])
+  const searchBlurTimeoutRef = useRef<number | null>(null)
 
   const uniqueCards = cards.length
   const totalCards = cards.reduce((sum, card) => sum + card.quantity + card.foilQuantity, 0)
@@ -230,31 +759,289 @@ export function CollectionPage({
     return map
   }, [cards])
 
-  const filteredCards = useMemo(() => {
-    const needle = normalize(searchTerm)
-    if (!needle) {
-      return cards
+  const setOptions = useMemo(
+    () =>
+      [...new Set(cards.map((card) => card.setCode.toUpperCase()))].sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [cards],
+  )
+  const typeOptions = useMemo(
+    () =>
+      [...new Set(cards.map((card) => inferPrimaryType(card.typeLine)))].sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [cards],
+  )
+  const colorOptions = useMemo(
+    () =>
+      [...new Set(cards.map((card) => colorIdentityLabel(card.colorIdentity)))].sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [cards],
+  )
+  const tagOptions = useMemo(
+    () =>
+      [...new Set(cards.flatMap((card) => card.tags.map((tag) => tag.trim()).filter(Boolean)))].sort(
+        (a, b) => a.localeCompare(b),
+      ),
+    [cards],
+  )
+  const conditionOptions = useMemo(
+    () =>
+      [...new Set(cards.map((card) => card.conditionCode.toUpperCase()))].sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [cards],
+  )
+  const languageOptions = useMemo(
+    () =>
+      [...new Set(cards.map((card) => card.language.toLowerCase()))].sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [cards],
+  )
+  const rarityOptions = useMemo(
+    () =>
+      [...new Set(cards.map((card) => (card.rarity ?? '').toLowerCase()).filter(Boolean))].sort(
+        (a, b) => a.localeCompare(b),
+      ),
+    [cards],
+  )
+  const searchQuery = useMemo(
+    () => [...normalizeSearchTerms(searchTerms), searchDraft.trim()].filter(Boolean).join(' '),
+    [searchTerms, searchDraft],
+  )
+  const searchTermBoxes = useMemo(() => getSearchTermBoxes(searchTerms), [searchTerms])
+  const activeSuggestionNeedle = useMemo(() => {
+    if (activeSearchBoxIndex >= 0) {
+      return (searchTerms[activeSearchBoxIndex] ?? '').trim().toLowerCase()
     }
+    return searchDraft.trim().toLowerCase()
+  }, [activeSearchBoxIndex, searchTerms, searchDraft])
 
+  const contextualTokenSuggestions = useMemo(() => {
+    const needle = activeSuggestionNeedle
+    const prefixMatch = needle.match(/^(set:|tag:|t:|type:|c:|id:|lang:|cond:|rarity:)(.*)$/)
+    if (!prefixMatch) {
+      return { suggestions: [] as FilterToken[], isContextMode: false }
+    }
+    const prefix = prefixMatch[1]
+    const rawQuery = prefixMatch[2].trim().toLowerCase()
+    const mapValues = (
+      values: string[],
+      kind: string,
+      labelBuilder: (value: string) => string,
+      tokenBuilder: (value: string) => string,
+    ): FilterToken[] =>
+      values
+        .filter((value) => {
+          if (!rawQuery) return true
+          return value.toLowerCase().includes(rawQuery)
+        })
+        .slice(0, 18)
+        .map((value, index) => ({
+          token: tokenBuilder(value),
+          label: labelBuilder(value),
+          kind,
+          source: 'contextual',
+          priority: index + 1,
+        }))
+
+    if (prefix === 'set:') {
+      return {
+        suggestions: mapValues(
+          setOptions,
+          'set',
+          (value) => `Set ${value.toUpperCase()}`,
+          (value) => `set:${value.toLowerCase()}`,
+        ),
+        isContextMode: true,
+      }
+    }
+    if (prefix === 'tag:') {
+      return {
+        suggestions: mapValues(
+          tagOptions,
+          'tag',
+          (value) => `Tag ${value}`,
+          (value) => `tag:${value.toLowerCase()}`,
+        ),
+        isContextMode: true,
+      }
+    }
+    if (prefix === 't:' || prefix === 'type:') {
+      const outPrefix = prefix === 'type:' ? 'type:' : 't:'
+      return {
+        suggestions: mapValues(
+          typeOptions,
+          'type',
+          (value) => `Type ${value}`,
+          (value) => `${outPrefix}${value.toLowerCase()}`,
+        ),
+        isContextMode: true,
+      }
+    }
+    if (prefix === 'c:' || prefix === 'id:') {
+      return {
+        suggestions: mapValues(
+          colorOptions,
+          'color',
+          (value) => `Color ${value}`,
+          (value) => `${prefix}${value.toLowerCase()}`,
+        ),
+        isContextMode: true,
+      }
+    }
+    if (prefix === 'lang:') {
+      return {
+        suggestions: mapValues(
+          languageOptions,
+          'language',
+          (value) => `Language ${value.toUpperCase()}`,
+          (value) => `lang:${value.toLowerCase()}`,
+        ),
+        isContextMode: true,
+      }
+    }
+    if (prefix === 'cond:') {
+      return {
+        suggestions: mapValues(
+          conditionOptions,
+          'condition',
+          (value) => `Condition ${value.toUpperCase()}`,
+          (value) => `cond:${value.toUpperCase()}`,
+        ),
+        isContextMode: true,
+      }
+    }
+    if (prefix === 'rarity:') {
+      return {
+        suggestions: mapValues(
+          rarityOptions,
+          'rarity',
+          (value) => `Rarity ${value}`,
+          (value) => `rarity:${value.toLowerCase()}`,
+        ),
+        isContextMode: true,
+      }
+    }
+    return { suggestions: [] as FilterToken[], isContextMode: false }
+  }, [
+    activeSuggestionNeedle,
+    setOptions,
+    tagOptions,
+    typeOptions,
+    colorOptions,
+    languageOptions,
+    conditionOptions,
+    rarityOptions,
+  ])
+
+  const parsedSearchPlan = useMemo(() => parseSearchPlan(searchQuery), [searchQuery])
+
+  const filteredCards = useMemo(() => {
     return cards.filter((card) => {
-      if (normalize(card.name).includes(needle)) {
-        return true
+      const typeName = inferPrimaryType(card.typeLine)
+      const colorLabel = colorIdentityLabel(card.colorIdentity)
+      if (!matchesSearchPlan(card, parsedSearchPlan)) {
+        return false
       }
-      if (normalize(card.setCode).includes(needle)) {
-        return true
+
+      if (finishFilter === 'any-foil' && card.foilQuantity <= 0) {
+        return false
       }
-      if (normalize(card.collectorNumber).includes(needle)) {
-        return true
+      if (finishFilter === 'nonfoil-only' && card.foilQuantity > 0) {
+        return false
       }
-      return card.tags.some((tag) => normalize(tag).includes(needle))
+      if (quickSetFilter && card.setCode.toUpperCase() !== quickSetFilter) {
+        return false
+      }
+      if (quickTypeFilter && typeName !== quickTypeFilter) {
+        return false
+      }
+      if (quickColorFilter && colorLabel !== quickColorFilter) {
+        return false
+      }
+
+      if (setFilters.size > 0 && !setFilters.has(card.setCode.toUpperCase())) {
+        return false
+      }
+      if (typeFilters.size > 0 && !typeFilters.has(typeName)) {
+        return false
+      }
+      if (colorFilters.size > 0 && !colorFilters.has(colorLabel)) {
+        return false
+      }
+      if (
+        tagFilters.size > 0 &&
+        !card.tags.some((tag) => tagFilters.has(tag.trim()))
+      ) {
+        return false
+      }
+      if (
+        conditionFilters.size > 0 &&
+        !conditionFilters.has(card.conditionCode.toUpperCase())
+      ) {
+        return false
+      }
+      if (
+        languageFilters.size > 0 &&
+        !languageFilters.has(card.language.toLowerCase())
+      ) {
+        return false
+      }
+      return true
     })
-  }, [cards, searchTerm])
+  }, [
+    cards,
+    parsedSearchPlan,
+    finishFilter,
+    quickSetFilter,
+    quickTypeFilter,
+    quickColorFilter,
+    setFilters,
+    typeFilters,
+    colorFilters,
+    tagFilters,
+    conditionFilters,
+    languageFilters,
+  ])
+
+  const sortedFilteredCards = useMemo(() => {
+    const next = [...filteredCards]
+    next.sort((a, b) => {
+      if (sortMode === 'name-asc') {
+        return a.name.localeCompare(b.name)
+      }
+      if (sortMode === 'price-desc') {
+        return (b.currentPrice ?? -1) - (a.currentPrice ?? -1)
+      }
+      if (sortMode === 'set-asc') {
+        const setDelta = a.setCode.localeCompare(b.setCode)
+        if (setDelta !== 0) {
+          return setDelta
+        }
+        return a.collectorNumber.localeCompare(b.collectorNumber, undefined, { numeric: true })
+      }
+      if (sortMode === 'updated-desc') {
+        return (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0)
+      }
+      const qtyDelta =
+        b.quantity + b.foilQuantity - (a.quantity + a.foilQuantity)
+      if (qtyDelta !== 0) {
+        return qtyDelta
+      }
+      return a.name.localeCompare(b.name)
+    })
+    return next
+  }, [filteredCards, sortMode])
 
   useEffect(() => {
     setListScrollTop(0)
     listRef.current?.scrollTo({ top: 0 })
     setImageLimit(IMAGE_PAGE_SIZE)
-  }, [viewMode, searchTerm])
+  }, [viewMode, compactMode, rowDensity, searchQuery, sortedFilteredCards.length, sortMode])
 
   useEffect(() => {
     setSelectedCardIds((previous) => {
@@ -272,16 +1059,240 @@ export function CollectionPage({
     })
   }, [cards])
 
-  const rowHeight = viewMode === 'compact' ? COMPACT_ROW_HEIGHT : TEXT_ROW_HEIGHT
-  const totalHeight = filteredCards.length * rowHeight
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void syncFilterTokens(profileId).catch(() => {
+        // Best effort. Search still works with fallback tokens.
+      })
+    }, 240)
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [profileId, cards.length])
+
+  useEffect(() => {
+    if (!searchHasFocus) {
+      setTokenSuggestions([])
+      setActiveSuggestionIndex(0)
+      return
+    }
+    if (contextualTokenSuggestions.isContextMode) {
+      setTokenSuggestions(contextualTokenSuggestions.suggestions)
+      setActiveSuggestionIndex((current) =>
+        contextualTokenSuggestions.suggestions.length === 0
+          ? 0
+          : Math.min(current, contextualTokenSuggestions.suggestions.length - 1),
+      )
+      setIsSuggestionLoading(false)
+      return
+    }
+    setIsSuggestionLoading(true)
+    const timer = window.setTimeout(() => {
+      const needle = activeSuggestionNeedle
+      void getFilterTokens(needle, 12)
+        .then((rows) => {
+          setTokenSuggestions(rows)
+          setActiveSuggestionIndex((current) =>
+            rows.length === 0 ? 0 : Math.min(current, rows.length - 1),
+          )
+        })
+        .catch(() => {
+          setTokenSuggestions([])
+          setActiveSuggestionIndex(0)
+        })
+        .finally(() => {
+          setIsSuggestionLoading(false)
+        })
+    }, 120)
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [activeSuggestionNeedle, searchHasFocus, contextualTokenSuggestions])
+
+  useEffect(() => {
+    return () => {
+      if (searchBlurTimeoutRef.current !== null) {
+        window.clearTimeout(searchBlurTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  const baseRowHeight = DENSITY_ROW_HEIGHT[rowDensity]
+  const rowHeight = compactMode ? Math.max(34, baseRowHeight - 4) : baseRowHeight
+  const totalHeight = sortedFilteredCards.length * rowHeight
   const startIndex = Math.max(0, Math.floor(listScrollTop / rowHeight) - OVERSCAN)
   const visibleCount = Math.ceil(VIRTUAL_HEIGHT / rowHeight) + OVERSCAN * 2
-  const endIndex = Math.min(filteredCards.length, startIndex + visibleCount)
-  const visibleRows = filteredCards.slice(startIndex, endIndex)
+  const endIndex = Math.min(sortedFilteredCards.length, startIndex + visibleCount)
+  const visibleRows = sortedFilteredCards.slice(startIndex, endIndex)
   const topPad = startIndex * rowHeight
   const bottomPad = Math.max(0, totalHeight - topPad - visibleRows.length * rowHeight)
 
-  const visibleImageCards = filteredCards.slice(0, imageLimit)
+  const visibleImageCards = sortedFilteredCards.slice(0, imageLimit)
+  const imageGridStyle = useMemo(
+    () => ({
+      gridTemplateColumns: `repeat(auto-fill, minmax(${DENSITY_IMAGE_MIN_WIDTH[rowDensity]}px, 1fr))`,
+    }),
+    [rowDensity],
+  )
+  const listGridTemplate = useMemo(() => {
+    if (compactMode) {
+      return 'minmax(260px, 2.4fr) 90px 72px 72px 72px minmax(248px, 1.8fr)'
+    }
+    const columns: string[] = ['minmax(220px, 2fr)']
+    if (textColumnState.set) {
+      columns.push('80px')
+    }
+    if (textColumnState.number) {
+      columns.push('80px')
+    }
+    if (textColumnState.tags) {
+      columns.push('minmax(220px, 2fr)')
+    }
+    if (textColumnState.price) {
+      columns.push('88px')
+    }
+    if (textColumnState.trend) {
+      columns.push('108px')
+    }
+    columns.push('72px', '72px', '72px', 'minmax(248px, 1.8fr)')
+    return columns.join(' ')
+  }, [compactMode, textColumnState])
+
+  function closeSearchSuggestions() {
+    setSearchHasFocus(false)
+    setTokenSuggestions([])
+    setActiveSuggestionIndex(0)
+  }
+
+  function handleSearchFocus() {
+    if (searchBlurTimeoutRef.current !== null) {
+      window.clearTimeout(searchBlurTimeoutRef.current)
+      searchBlurTimeoutRef.current = null
+    }
+    setSearchHasFocus(true)
+  }
+
+  function handleSearchBlur() {
+    if (searchBlurTimeoutRef.current !== null) {
+      window.clearTimeout(searchBlurTimeoutRef.current)
+    }
+    searchBlurTimeoutRef.current = window.setTimeout(() => {
+      closeSearchSuggestions()
+    }, 120)
+  }
+
+  function handleSearchDraftChange(nextValue: string) {
+    if (!/\s/.test(nextValue)) {
+      setSearchDraft(nextValue)
+      return
+    }
+    const pieces = nextValue.split(/\s+/)
+    const normalizedPieces = normalizeSearchTerms(pieces)
+    const keepDraft = /\s$/.test(nextValue) ? '' : normalizedPieces.pop() ?? ''
+    if (normalizedPieces.length > 0) {
+      setSearchTerms((previous) => [...previous, ...normalizedPieces])
+    }
+    setSearchDraft(keepDraft)
+  }
+
+  function commitDraftAsTerm() {
+    const normalizedDraft = searchDraft.trim()
+    if (!normalizedDraft) {
+      return
+    }
+    setSearchTerms((previous) => [...previous, normalizedDraft])
+    setSearchDraft('')
+    setActiveSearchBoxIndex(-1)
+  }
+
+  function updateSearchTermAt(index: number, value: string) {
+    setSearchTerms((previous) => {
+      if (index < 0 || index >= previous.length) {
+        return previous
+      }
+      const next = [...previous]
+      next[index] = value
+      return next
+    })
+  }
+
+  function removeSearchTermAt(index: number) {
+    setSearchTerms((previous) => previous.filter((_, itemIndex) => itemIndex !== index))
+    setActiveSearchBoxIndex(-1)
+    window.setTimeout(() => {
+      searchInputRef.current?.focus()
+    }, 0)
+  }
+
+  function commitSearchTermNormalization() {
+    setSearchTerms((previous) => normalizeSearchTerms(previous))
+  }
+
+  function applyTokenSuggestion(token: string) {
+    if (activeSearchBoxIndex >= 0) {
+      updateSearchTermAt(activeSearchBoxIndex, token)
+    } else {
+      setSearchTerms((previous) => [...previous, token])
+      setSearchDraft('')
+    }
+    setActiveSuggestionIndex(0)
+    setSearchHasFocus(true)
+    window.setTimeout(() => {
+      if (activeSearchBoxIndex >= 0) {
+        searchTokenInputRefs.current[activeSearchBoxIndex]?.focus()
+      } else {
+        searchInputRef.current?.focus()
+      }
+    }, 0)
+  }
+
+  function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>, index: number) {
+    if (!searchHasFocus || tokenSuggestions.length === 0) {
+      if (event.key === ' ' && index === -1 && searchDraft.trim()) {
+        event.preventDefault()
+        commitDraftAsTerm()
+      }
+      if (event.key === 'Backspace' && index === -1 && !searchDraft && searchTerms.length > 0) {
+        event.preventDefault()
+        setActiveSearchBoxIndex(searchTerms.length - 1)
+        window.setTimeout(() => {
+          searchTokenInputRefs.current[searchTerms.length - 1]?.focus()
+        }, 0)
+      }
+      return
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      setActiveSuggestionIndex((current) =>
+        current >= tokenSuggestions.length - 1 ? 0 : current + 1,
+      )
+      return
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      setActiveSuggestionIndex((current) =>
+        current <= 0 ? tokenSuggestions.length - 1 : current - 1,
+      )
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeSearchSuggestions()
+      return
+    }
+    if (event.key === 'Enter' || event.key === 'Tab') {
+      const suggestion = tokenSuggestions[activeSuggestionIndex]
+      if (suggestion) {
+        event.preventDefault()
+        applyTokenSuggestion(suggestion.token)
+        return
+      }
+      if (event.key === 'Enter' && index === -1 && searchDraft.trim()) {
+        event.preventDefault()
+        commitDraftAsTerm()
+      }
+    }
+  }
 
   function handleChooseCsvFile() {
     fileInputRef.current?.click()
@@ -308,6 +1319,41 @@ export function CollectionPage({
 
   function handleVirtualScroll(event: UIEvent<HTMLDivElement>) {
     setListScrollTop(event.currentTarget.scrollTop)
+  }
+
+  function toggleFilterValue(
+    setter: (value: Set<string> | ((previous: Set<string>) => Set<string>)) => void,
+    value: string,
+  ) {
+    setter((previous) => {
+      const next = new Set(previous)
+      if (next.has(value)) {
+        next.delete(value)
+      } else {
+        next.add(value)
+      }
+      return next
+    })
+  }
+
+  function clearAllFilters() {
+    setSetFilters(new Set())
+    setTypeFilters(new Set())
+    setColorFilters(new Set())
+    setTagFilters(new Set())
+    setConditionFilters(new Set())
+    setLanguageFilters(new Set())
+    setQuickSetFilter('')
+    setQuickTypeFilter('')
+    setQuickColorFilter('')
+    setFinishFilter('all')
+    setSearchTerms([])
+    setSearchDraft('')
+    setActiveSearchBoxIndex(-1)
+  }
+
+  function toggleTextColumn(id: TextColumnId) {
+    setTextColumnState((previous) => ({ ...previous, [id]: !previous[id] }))
   }
 
   function toggleFoilMode(cardId: string) {
@@ -339,7 +1385,34 @@ export function CollectionPage({
     }
   }
 
+  async function handleVersionAdjust(
+    row: VersionRow,
+    foil: boolean,
+    delta: 1 | -1,
+    fallbackName: string,
+  ) {
+    if (delta > 0) {
+      await onAddPrinting({
+        scryfallId: row.scryfallId,
+        name: fallbackName,
+        setCode: row.setCode.toLowerCase(),
+        collectorNumber: row.collectorNumber,
+        imageUrl: resolveCardImageUrl(row.imageUrl, row.scryfallId) ?? undefined,
+        foil,
+      })
+      return
+    }
+
+    if (foil && row.ownedFoilQuantity > 0) {
+      await onDecrement(row.scryfallId, true)
+    }
+    if (!foil && row.ownedQuantity > 0) {
+      await onDecrement(row.scryfallId, false)
+    }
+  }
+
   async function handleOpenVersions(card: OwnedCard) {
+    setModalMode('versions')
     setVersionAnchor(card)
     setVersionError('')
     setIsLoadingVersions(true)
@@ -354,10 +1427,60 @@ export function CollectionPage({
     }
   }
 
-  function handleCloseVersions() {
+  function closeModal() {
+    setModalMode(null)
     setVersionAnchor(null)
     setVersionRows([])
     setVersionError('')
+    setAddMenuError('')
+    setIsSearchingAddMenu(false)
+  }
+
+  async function handleSearchAddMenu() {
+    if (!addMenuQuery.trim()) {
+      setAddMenuResults([])
+      setAddMenuError('Enter a card name or Scryfall query.')
+      return
+    }
+    setAddMenuError('')
+    setIsSearchingAddMenu(true)
+    try {
+      const rows = await searchCardsForAddMenu(addMenuQuery)
+      setAddMenuResults(rows)
+      if (!rows.length) {
+        setAddMenuError('No cards matched that query.')
+      }
+    } catch (error) {
+      setAddMenuResults([])
+      setAddMenuError(
+        error instanceof Error ? error.message : 'Unable to search cards.',
+      )
+    } finally {
+      setIsSearchingAddMenu(false)
+    }
+  }
+
+  function handleOpenAddMenu() {
+    setModalMode('add')
+    setAddMenuQuery('name:"Sol Ring"')
+    setAddMenuResults([])
+    setAddMenuError('')
+  }
+
+  async function handleAddMenuAdjust(row: AddMenuCard, foil: boolean) {
+    await onAddPrinting({
+      scryfallId: row.scryfallId,
+      name: row.name,
+      setCode: row.setCode.toLowerCase(),
+      collectorNumber: row.collectorNumber,
+      imageUrl: resolveCardImageUrl(row.imageUrl, row.scryfallId) ?? undefined,
+      typeLine: row.typeLine ?? null,
+      colorIdentity: row.colorIdentity.length ? row.colorIdentity : undefined,
+      manaValue: row.manaValue,
+      rarity: row.rarity,
+      foil,
+      currentPrice: row.marketPrice,
+    })
   }
 
   const editingCard = useMemo(
@@ -378,7 +1501,7 @@ export function CollectionPage({
   }
 
   function selectVisibleRows() {
-    setSelectedCardIds(new Set(filteredCards.map((card) => card.scryfallId)))
+    setSelectedCardIds(new Set(sortedFilteredCards.map((card) => card.scryfallId)))
   }
 
   function clearSelectedRows() {
@@ -468,6 +1591,9 @@ export function CollectionPage({
     }
   }
 
+  const modalStep = modalMode === 'add' ? 1 : modalMode === 'versions' ? 2 : 0
+  const modalProgressPct = modalStep > 0 ? (modalStep / 2) * 100 : 0
+
   return (
     <section className="panel collection-panel">
       <div className="panel-head">
@@ -475,40 +1601,354 @@ export function CollectionPage({
           <h2>{profileName} Collection</h2>
           <p className="muted">Collection-first view with quantity controls, tags, and market movement.</p>
         </div>
-        <div className="collection-actions">
-          <button className="button" onClick={onOpenMarket} type="button">
-            Open Market
-          </button>
-          <button
-            className="button subtle"
-            onClick={() => void onUndoLastAction()}
-            type="button"
-            disabled={!canUndo || isSyncing}
-            title={undoLabel || 'Undo last action'}
-          >
-            Undo
-          </button>
-          <button className="button subtle" onClick={handleChooseCsvFile} type="button" disabled={isSyncing}>
-            Import Archidekt CSV
-          </button>
+        <div className="collection-action-block">
+          <div className="collection-actions">
+            <button className="button paw-pill" onClick={handleOpenAddMenu} type="button">
+              <img src="/ui-icons/plus.svg" className="ui-icon" alt="" aria-hidden="true" />
+              Add Card
+            </button>
+            <button className="button paw-pill" onClick={onOpenMarket} type="button">
+              Open Market
+            </button>
+            <button className="button subtle paw-pill" onClick={handleChooseCsvFile} type="button" disabled={isSyncing}>
+              Import Archidekt CSV
+            </button>
+            <button className="button subtle paw-pill" type="button" disabled title="Export is being finalized">
+              Export (soon)
+            </button>
+          </div>
+          <div className="collection-actions collection-actions-secondary">
+            <button
+              className="button subtle"
+              onClick={() => void onUndoLastAction()}
+              type="button"
+              disabled={!canUndo || isSyncing}
+              title={undoLabel || 'Undo last action'}
+            >
+              Undo
+            </button>
+          </div>
           <input ref={fileInputRef} type="file" accept=".csv,text/csv" onChange={handleFileSelected} style={{ display: 'none' }} />
         </div>
       </div>
 
       <div className="collection-toolbar">
-        <div className="view-toggle">
-          <button className={`mode-pill ${viewMode === 'text' ? 'active' : ''}`} onClick={() => setViewMode('text')} type="button">
-            Text View
-          </button>
-          <button className={`mode-pill ${viewMode === 'image' ? 'active' : ''}`} onClick={() => setViewMode('image')} type="button">
-            Image View
-          </button>
-          <button className={`mode-pill ${viewMode === 'compact' ? 'active' : ''}`} onClick={() => setViewMode('compact')} type="button">
-            Compact View
-          </button>
+        <div className="toolbar-section">
+          <div className="view-toggle">
+            <button className={`mode-pill paw-pill ${viewMode === 'text' ? 'active' : ''}`} onClick={() => setViewMode('text')} type="button">
+              Text View
+            </button>
+            <button className={`mode-pill paw-pill ${viewMode === 'image' ? 'active' : ''}`} onClick={() => setViewMode('image')} type="button">
+              Image View
+            </button>
+            <label className="mode-pill compact-toggle">
+              <input
+                type="checkbox"
+                checked={compactMode}
+                onChange={(event) => setCompactMode(event.target.checked)}
+                disabled={viewMode === 'image'}
+              />
+              Compact Rows
+            </label>
+            <button className="mode-pill paw-pill" type="button" onClick={() => setShowAdvancedFilters((current) => !current)}>
+              <img src="/ui-icons/filter.svg" className="ui-icon" alt="" aria-hidden="true" />
+              {showAdvancedFilters ? 'Hide Filters' : 'Filters'}
+            </button>
+            <button className="mode-pill paw-pill" type="button" onClick={clearAllFilters}>
+              Clear Filters
+            </button>
+          </div>
+          <div className="density-toggle" role="group" aria-label="Row density">
+            <button type="button" className={`density-pill ${rowDensity === 'comfortable' ? 'active' : ''}`} onClick={() => setRowDensity('comfortable')}>
+              Comfortable
+            </button>
+            <button type="button" className={`density-pill ${rowDensity === 'balanced' ? 'active' : ''}`} onClick={() => setRowDensity('balanced')}>
+              Balanced
+            </button>
+            <button type="button" className={`density-pill ${rowDensity === 'dense' ? 'active' : ''}`} onClick={() => setRowDensity('dense')}>
+              Dense
+            </button>
+          </div>
         </div>
-        <input className="collection-search" type="search" placeholder="Search cards, set, number, or tags" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} />
+        <div className="toolbar-section toolbar-search-section">
+          <div className="search-with-icon token-search-shell">
+            <img src="/ui-icons/search.svg" className="ui-icon" alt="" aria-hidden="true" />
+            <div
+              className="tokenized-search-editor"
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget) {
+                  event.preventDefault()
+                  setActiveSearchBoxIndex(-1)
+                  searchInputRef.current?.focus()
+                }
+              }}
+            >
+              {searchTermBoxes.map((box, index) => (
+                <span key={`${box.token}-${index}`} className={`search-term-box chip-kind-${box.kind}`}>
+                  <input
+                    ref={(element) => {
+                      searchTokenInputRefs.current[index] = element
+                    }}
+                    className="search-term-box-input"
+                    type="text"
+                    value={searchTerms[index] ?? ''}
+                    onChange={(event) => updateSearchTermAt(index, event.target.value)}
+                    onFocus={() => {
+                      handleSearchFocus()
+                      setActiveSearchBoxIndex(index)
+                    }}
+                    onBlur={() => {
+                      commitSearchTermNormalization()
+                      handleSearchBlur()
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Backspace' && !(searchTerms[index] ?? '').trim()) {
+                        event.preventDefault()
+                        removeSearchTermAt(index)
+                        return
+                      }
+                      handleSearchKeyDown(event, index)
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="search-term-box-remove"
+                    title={`Remove ${box.token}`}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => removeSearchTermAt(index)}
+                  >
+                    x
+                  </button>
+                </span>
+              ))}
+              <input
+                ref={searchInputRef}
+                className={`collection-search search-draft-input ${searchDraft.trim() ? `chip-kind-${inferTokenKind(searchDraft)}` : ''}`}
+                type="text"
+                placeholder='Search cards (supports set:, t:, tag:, c:, mv>=, is:foil)'
+                value={searchDraft}
+                onChange={(event) => handleSearchDraftChange(event.target.value)}
+                onFocus={() => {
+                  handleSearchFocus()
+                  setActiveSearchBoxIndex(-1)
+                }}
+                onBlur={() => {
+                  commitDraftAsTerm()
+                  handleSearchBlur()
+                }}
+                onKeyDown={(event) => handleSearchKeyDown(event, -1)}
+              />
+            </div>
+            {searchHasFocus ? (
+              <div className="token-suggestion-dropdown">
+                {isSuggestionLoading ? <p className="token-suggestion-empty">Loading suggestions...</p> : null}
+                {!isSuggestionLoading && tokenSuggestions.length === 0 ? (
+                  <p className="token-suggestion-empty">
+                    {contextualTokenSuggestions.isContextMode
+                      ? 'No options match this filter. Keep typing or remove this filter token.'
+                      : 'No tokens match. Try set:, tag:, c:, or mv>=.'}
+                  </p>
+                ) : null}
+                {!isSuggestionLoading && tokenSuggestions.length > 0 ? (
+                  tokenSuggestions.map((token, index) => (
+                    <button
+                      key={`${token.kind}-${token.token}`}
+                      type="button"
+                      className={`token-suggestion-item token-kind-${inferTokenKind(token.token)} ${index === activeSuggestionIndex ? 'active' : ''}`}
+                      onMouseDown={(event) => {
+                        event.preventDefault()
+                        applyTokenSuggestion(token.token)
+                      }}
+                    >
+                      <span className="token-suggestion-token">{token.token}</span>
+                      <span className="token-suggestion-label">{token.label}</span>
+                    </button>
+                  ))
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          <p className="muted small search-help-line">
+            {'Tip: use set:mh3 tag:owned c:ur mv>=3 for fast narrowing.'}
+          </p>
+        </div>
       </div>
+
+      <div className="collection-subtoolbar">
+        <div className="quick-filter-row">
+          <label className="quick-filter-control">
+            <span className="muted small">Quick Set</span>
+            <select
+              className="tag-select"
+              value={quickSetFilter}
+              onChange={(event) => setQuickSetFilter(event.target.value)}
+            >
+              <option value="">All Sets</option>
+              {setOptions.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="quick-filter-control">
+            <span className="muted small">Quick Type</span>
+            <select
+              className="tag-select"
+              value={quickTypeFilter}
+              onChange={(event) => setQuickTypeFilter(event.target.value)}
+            >
+              <option value="">All Types</option>
+              {typeOptions.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="quick-filter-control">
+            <span className="muted small">Quick Color</span>
+            <select
+              className="tag-select"
+              value={quickColorFilter}
+              onChange={(event) => setQuickColorFilter(event.target.value)}
+            >
+              <option value="">All Colors</option>
+              {colorOptions.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="sort-source-row">
+          <label className="quick-filter-control">
+            <span className="muted small">Sort</span>
+            <select className="tag-select" value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}>
+              <option value="qty-desc">Quantity (High to Low)</option>
+              <option value="name-asc">Name (A to Z)</option>
+              <option value="price-desc">Price (High to Low)</option>
+              <option value="set-asc">Set / Number</option>
+              <option value="updated-desc">Recently Updated</option>
+            </select>
+          </label>
+          <label className="quick-filter-control">
+            <span className="muted small">Price Source</span>
+            <select
+              className="tag-select"
+              value={priceSource}
+              onChange={(event) => setPriceSource(event.target.value as (typeof PRICE_SOURCE_OPTIONS)[number]['id'])}
+            >
+              {PRICE_SOURCE_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </div>
+
+      {showAdvancedFilters ? (
+        <div className="advanced-filter-grid">
+          <label>
+            <span className="muted small">Finish</span>
+            <select
+              className="tag-select"
+              value={finishFilter}
+              onChange={(event) => setFinishFilter(event.target.value as FinishFilter)}
+            >
+              <option value="all">All</option>
+              <option value="any-foil">Has Foil</option>
+              <option value="nonfoil-only">Nonfoil Only</option>
+            </select>
+          </label>
+          <details className="filter-dropdown">
+            <summary>Set ({setFilters.size})</summary>
+            <div className="filter-dropdown-body">
+              {setOptions.map((value) => (
+                <label key={value} className="filter-option">
+                  <input type="checkbox" checked={setFilters.has(value)} onChange={() => toggleFilterValue(setSetFilters, value)} />
+                  <span>{value}</span>
+                </label>
+              ))}
+            </div>
+          </details>
+          <details className="filter-dropdown">
+            <summary>Type ({typeFilters.size})</summary>
+            <div className="filter-dropdown-body">
+              {typeOptions.map((value) => (
+                <label key={value} className="filter-option">
+                  <input type="checkbox" checked={typeFilters.has(value)} onChange={() => toggleFilterValue(setTypeFilters, value)} />
+                  <span>{value}</span>
+                </label>
+              ))}
+            </div>
+          </details>
+          <details className="filter-dropdown">
+            <summary>Color ({colorFilters.size})</summary>
+            <div className="filter-dropdown-body">
+              {colorOptions.map((value) => (
+                <label key={value} className="filter-option">
+                  <input type="checkbox" checked={colorFilters.has(value)} onChange={() => toggleFilterValue(setColorFilters, value)} />
+                  <span>{value}</span>
+                </label>
+              ))}
+            </div>
+          </details>
+          <details className="filter-dropdown">
+            <summary>Tags ({tagFilters.size})</summary>
+            <div className="filter-dropdown-body">
+              {tagOptions.map((value) => (
+                <label key={value} className="filter-option">
+                  <input type="checkbox" checked={tagFilters.has(value)} onChange={() => toggleFilterValue(setTagFilters, value)} />
+                  <span>{value}</span>
+                </label>
+              ))}
+            </div>
+          </details>
+          <details className="filter-dropdown">
+            <summary>Condition ({conditionFilters.size})</summary>
+            <div className="filter-dropdown-body">
+              {conditionOptions.map((value) => (
+                <label key={value} className="filter-option">
+                  <input type="checkbox" checked={conditionFilters.has(value)} onChange={() => toggleFilterValue(setConditionFilters, value)} />
+                  <span>{value}</span>
+                </label>
+              ))}
+            </div>
+          </details>
+          <details className="filter-dropdown">
+            <summary>Language ({languageFilters.size})</summary>
+            <div className="filter-dropdown-body">
+              {languageOptions.map((value) => (
+                <label key={value} className="filter-option">
+                  <input type="checkbox" checked={languageFilters.has(value)} onChange={() => toggleFilterValue(setLanguageFilters, value)} />
+                  <span>{value.toUpperCase()}</span>
+                </label>
+              ))}
+            </div>
+          </details>
+          {viewMode !== 'image' ? (
+            <details className="filter-dropdown">
+              <summary>Columns</summary>
+              <div className="filter-dropdown-body">
+                {TEXT_COLUMNS.map((column) => (
+                  <label key={column.id} className="filter-option">
+                    <input
+                      type="checkbox"
+                      checked={textColumnState[column.id]}
+                      onChange={() => toggleTextColumn(column.id)}
+                    />
+                    <span>{column.label}</span>
+                  </label>
+                ))}
+              </div>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="bulk-tag-toolbar">
         <span className="muted small">Selected {selectedCardIds.size}</span>
@@ -571,14 +2011,14 @@ export function CollectionPage({
         </div>
       ) : (
         <>
-          <p className="muted small">Showing {filteredCards.length} of {cards.length} printings.</p>
+          <p className="muted small">Showing {sortedFilteredCards.length} of {cards.length} printings.</p>
           {viewMode === 'image' ? (
             <>
-              <div className="collection-image-grid">
+              <div className={`collection-image-grid density-${rowDensity}`} style={imageGridStyle}>
                 {visibleImageCards.map((card) => {
                   const total = card.quantity + card.foilQuantity
                   const versions = versionCountsByName.get(normalize(card.name)) ?? 1
-                  const imageSrc = card.imageUrl ?? fallbackScryfallImageUrl(card.scryfallId)
+                  const imageSrc = resolveCardImageUrl(card.imageUrl, card.scryfallId)
                   const foilMode = !!foilModeByCard[card.scryfallId]
                   const activeTag = activeTagByCard[card.scryfallId]
                   const isSelected = selectedCardIds.has(card.scryfallId)
@@ -594,7 +2034,12 @@ export function CollectionPage({
 
                       <button className="image-card-button" type="button" onClick={() => void handleOpenVersions(card)}>
                         <div className="card-image-wrap">
-                          <img src={imageSrc} alt={card.name} loading="lazy" />
+                          <CardArtImage key={imageSrc ?? 'no-image'} src={imageSrc} alt={card.name} />
+                          <div className="overlay-badges">
+                            <span className="badge badge-owned">Qty {total}</span>
+                            {card.foilQuantity > 0 ? <span className="badge badge-foil">Foil {card.foilQuantity}</span> : null}
+                            {versions > 1 ? <span className="badge badge-version">{versions} Vers</span> : null}
+                          </div>
                         </div>
                       </button>
 
@@ -610,13 +2055,16 @@ export function CollectionPage({
                         <button className="linkish-title" type="button" onClick={() => void handleOpenVersions(card)}>{card.name}</button>
                         <p className="muted small">{card.setCode.toUpperCase()} #{card.collectorNumber} · versions owned {versions}</p>
                         <p className="muted small">
+                          {inferPrimaryType(card.typeLine)} · {colorIdentityLabel(card.colorIdentity)}
+                        </p>
+                        <p className="muted small">
                           {card.conditionCode}/{card.language.toUpperCase()}
                           {card.locationName ? ` · ${card.locationName}` : ''}
                         </p>
 
                         <div className="price-line">
                           <span className="price-current">{formatUsd(card.currentPrice)}</span>
-                          <span className={`trend trend-${card.priceDirection}`}>{trendGlyph(card.priceDirection)} {deltaText(card.priceDelta)}</span>
+                          <span className={`trend trend-${card.priceDirection} trend-pill`}>{trendGlyph(card.priceDirection)} {deltaText(card.priceDelta)}</span>
                         </div>
 
                         <div className="tag-line">
@@ -634,6 +2082,9 @@ export function CollectionPage({
 
                         <div className="row-actions">
                           <span className="muted small">Qty {total}</span>
+                          <button className="button tiny subtle" type="button" onClick={() => void handleOpenVersions(card)}>
+                            Versions
+                          </button>
                           <button className="button tiny subtle" type="button" onClick={() => openMetadataEditor(card)}>
                             Edit
                           </button>
@@ -652,7 +2103,7 @@ export function CollectionPage({
                 })}
               </div>
 
-              {imageLimit < filteredCards.length ? (
+              {imageLimit < sortedFilteredCards.length ? (
                 <div className="centered-row">
                   <button className="button subtle" type="button" onClick={() => setImageLimit((current) => current + IMAGE_PAGE_SIZE)}>
                     Load More
@@ -661,15 +2112,22 @@ export function CollectionPage({
               ) : null}
             </>
           ) : (
-            <div className="virtual-list-shell">
-              <div className={`collection-head-row ${viewMode === 'compact' ? 'compact' : ''}`}>
+            <div className={`virtual-list-shell density-${rowDensity}`}>
+              <div
+                className={`collection-head-row ${compactMode ? 'compact' : ''} density-${rowDensity}`}
+                style={{ gridTemplateColumns: listGridTemplate }}
+              >
                 <span>Card</span>
-                {viewMode === 'text' ? (
+                {!compactMode ? (
                   <>
-                    <span>Set</span><span>#</span><span>Tags</span><span>Price</span><span>Trend</span>
+                    {textColumnState.set ? <span>Set</span> : null}
+                    {textColumnState.number ? <span>#</span> : null}
+                    {textColumnState.tags ? <span>Tags</span> : null}
+                    {textColumnState.price ? <span>Price</span> : null}
+                    {textColumnState.trend ? <span>Trend</span> : null}
                   </>
                 ) : null}
-                {viewMode === 'compact' ? <span>Versions</span> : null}
+                {compactMode ? <span>Versions</span> : null}
                 <span>Nonfoil</span><span>Foil</span><span>Total</span><span>Actions</span>
               </div>
               <div ref={listRef} className="virtual-list" onScroll={handleVirtualScroll} style={{ height: `${VIRTUAL_HEIGHT}px` }}>
@@ -678,9 +2136,14 @@ export function CollectionPage({
                   const total = card.quantity + card.foilQuantity
                   const versions = versionCountsByName.get(normalize(card.name)) ?? 1
                   const isSelected = selectedCardIds.has(card.scryfallId)
+                  const imageSrc = resolveCardImageUrl(card.imageUrl, card.scryfallId)
 
                   return (
-                    <div key={card.scryfallId} className={`collection-row ${viewMode === 'compact' ? 'compact' : ''}`}>
+                    <div
+                      key={card.scryfallId}
+                      className={`collection-row ${compactMode ? 'compact' : ''} density-${rowDensity}`}
+                      style={{ gridTemplateColumns: listGridTemplate }}
+                    >
                       <div className="card-cell-wrap">
                         <label className="select-row">
                           <input
@@ -689,31 +2152,50 @@ export function CollectionPage({
                             onChange={(event) => toggleSelectCard(card.scryfallId, event.target.checked)}
                           />
                         </label>
+                        <div className="mini-art">
+                          <CardArtImage key={imageSrc ?? 'no-image'} src={imageSrc} alt={card.name} />
+                        </div>
                         <button className="linkish-title" type="button" onClick={() => void handleOpenVersions(card)}>{card.name}</button>
                       </div>
-                      {viewMode === 'text' ? (
+                      {!compactMode ? (
                         <>
-                          <span>{card.setCode.toUpperCase()}</span>
-                          <span>{card.collectorNumber}</span>
-                          <div className="tag-line inline">{card.tags.slice(0, 3).map((tag) => <span key={`${card.scryfallId}-${tag}`} className="tag-chip">{tag.toUpperCase()}</span>)}</div>
-                          <span>{formatUsd(card.currentPrice)}</span>
-                          <span className={`trend trend-${card.priceDirection}`}>{trendGlyph(card.priceDirection)} {deltaText(card.priceDelta)}</span>
+                          {textColumnState.set ? <span>{card.setCode.toUpperCase()}</span> : null}
+                          {textColumnState.number ? <span>{card.collectorNumber}</span> : null}
+                          {textColumnState.tags ? (
+                            <div className="tag-line inline">
+                              {card.tags.slice(0, 3).map((tag) => (
+                                <span key={`${card.scryfallId}-${tag}`} className="tag-chip">{tag.toUpperCase()}</span>
+                              ))}
+                            </div>
+                          ) : null}
+                          {textColumnState.price ? <span className="price-pill">{formatUsd(card.currentPrice)}</span> : null}
+                          {textColumnState.trend ? (
+                            <span className={`trend trend-${card.priceDirection} trend-pill`}>{trendGlyph(card.priceDirection)} {deltaText(card.priceDelta)}</span>
+                          ) : null}
                         </>
                       ) : null}
-                      {viewMode === 'compact' ? <span className="muted">{versions}</span> : null}
+                      {compactMode ? <span className="muted">{versions}</span> : null}
                       <span>{card.quantity}</span><span>{card.foilQuantity}</span><span>{total}</span>
-                      <div className="row-actions">
-                        <button className="button tiny" onClick={() => void onIncrement(card.scryfallId, false)} type="button">+N</button>
-                        <button className="button tiny subtle" onClick={() => void onIncrement(card.scryfallId, true)} type="button">+F</button>
-                        <button className="button tiny subtle" onClick={() => void onDecrement(card.scryfallId, false)} type="button">-N</button>
-                        <button className="button tiny subtle" onClick={() => void onDecrement(card.scryfallId, true)} type="button">-F</button>
-                        <button className="button tiny subtle" onClick={() => openMetadataEditor(card)} type="button">Edit</button>
-                        <button className="button tiny danger" onClick={() => void onRemove(card.scryfallId)} type="button">Remove</button>
+                      <div className="row-actions action-cluster">
+                        <div className="qty-action-group">
+                          <button className="button tiny action-mini" onClick={() => void onIncrement(card.scryfallId, false)} type="button">+N</button>
+                          <button className="button tiny subtle action-mini" onClick={() => void onIncrement(card.scryfallId, true)} type="button">+F</button>
+                          <button className="button tiny subtle action-mini" onClick={() => void onDecrement(card.scryfallId, false)} type="button">-N</button>
+                          <button className="button tiny subtle action-mini" onClick={() => void onDecrement(card.scryfallId, true)} type="button">-F</button>
+                        </div>
+                        <button className="button tiny subtle action-mini" onClick={() => openMetadataEditor(card)} type="button">Edit</button>
+                        <button className="button tiny danger action-mini" onClick={() => void onRemove(card.scryfallId)} type="button">Remove</button>
                       </div>
                     </div>
                   )
                 })}
                 <div style={{ height: `${bottomPad}px` }} />
+              </div>
+              <div className="table-status-strip">
+                <span>{sortedFilteredCards.length} printings visible</span>
+                <span>Sort: {SORT_MODE_LABELS[sortMode]}</span>
+                <span>Density: {rowDensity}</span>
+                <span>Source: {PRICE_SOURCE_OPTIONS.find((entry) => entry.id === priceSource)?.label ?? 'unknown'}</span>
               </div>
             </div>
           )}
@@ -769,38 +2251,186 @@ export function CollectionPage({
         </section>
       ) : null}
 
-      {versionAnchor ? (
-        <section className="version-panel">
-          <div className="version-head">
-            <div>
-              <h3>{versionAnchor.name} Versions</h3>
-              <p className="muted small">Owned versions are at the top. Unowned prints are dimmed and sorted by release date.</p>
+      {modalMode ? createPortal(
+        <div className="submenu-overlay" onClick={closeModal}>
+          <section className="submenu-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="submenu-head">
+              <div>
+                <h3>{modalMode === 'versions' ? `${versionAnchor?.name ?? 'Card'} Versions` : 'Add Cards To Collection'}</h3>
+                <p className="muted small">
+                  {modalMode === 'versions'
+                    ? 'Owned printings are highlighted first. Adjust quantities directly from this panel.'
+                    : 'Search by card name or Scryfall syntax, then add nonfoil or foil instantly.'}
+                </p>
+              </div>
+              <button className="icon-ghost-button" type="button" onClick={closeModal} aria-label="Close submenu">
+                <img src="/ui-icons/x.svg" className="ui-icon" alt="" aria-hidden="true" />
+              </button>
             </div>
-            <button className="button subtle tiny" type="button" onClick={handleCloseVersions}>Close</button>
-          </div>
 
-          {isLoadingVersions ? <p className="muted">Loading versions from Scryfall...</p> : null}
-          {versionError ? <p className="error-line">{versionError}</p> : null}
-
-          {!isLoadingVersions && !versionError ? (
-            <div className="version-grid">
-              {versionRows.map((row) => {
-                const total = row.ownedQuantity + row.ownedFoilQuantity
-                const owned = total > 0
-                return (
-                  <article key={row.scryfallId} className={`version-card ${owned ? 'owned' : 'unowned'}`}>
-                    <div className="version-image-wrap"><img src={row.imageUrl ?? fallbackScryfallImageUrl(row.scryfallId)} alt={`${versionAnchor.name} ${row.setCode}`} loading="lazy" /></div>
-                    <div className="version-body">
-                      <p>{row.setCode} #{row.collectorNumber}</p>
-                      <p className="muted small">Released {formatDate(row.releasedAt)}</p>
-                      <p className="small">Owned: {row.ownedQuantity} nonfoil / {row.ownedFoilQuantity} foil</p>
-                    </div>
-                  </article>
-                )
-              })}
+            <div className="submenu-steps">
+              <button
+                className={`step-pill ${modalMode === 'add' ? 'active' : ''}`}
+                type="button"
+                onClick={() => setModalMode('add')}
+              >
+                1. Add Card
+              </button>
+              <button
+                className={`step-pill ${modalMode === 'versions' ? 'active' : ''}`}
+                type="button"
+                onClick={() => versionAnchor && setModalMode('versions')}
+                disabled={!versionAnchor}
+              >
+                2. Versions
+              </button>
             </div>
-          ) : null}
-        </section>
+            <div className="submenu-progress-rail" aria-hidden="true">
+              <span className="submenu-progress-fill" style={{ width: `${modalProgressPct}%` }} />
+            </div>
+            <p className="muted small submenu-step-caption">
+              Step {modalStep || 1} of 2
+              {modalMode === 'add' ? ': search and add a printing' : ': review versions and adjust quantities'}
+            </p>
+
+            {modalMode === 'add' ? (
+              <div className="submenu-content">
+                <div className="submenu-layout">
+                  <div className="submenu-main">
+                    <form
+                      className="submenu-search-row"
+                      onSubmit={(event) => {
+                        event.preventDefault()
+                        void handleSearchAddMenu()
+                      }}
+                    >
+                      <div className="search-with-icon">
+                        <img src="/ui-icons/search.svg" className="ui-icon" alt="" aria-hidden="true" />
+                        <input
+                          className="collection-search"
+                          value={addMenuQuery}
+                          onChange={(event) => setAddMenuQuery(event.target.value)}
+                          placeholder='Search cards to add (e.g. name:"Sol Ring" or set:lea)'
+                        />
+                      </div>
+                      <button className="button paw-pill" type="submit" disabled={isSearchingAddMenu}>
+                        {isSearchingAddMenu ? 'Searching...' : 'Search'}
+                      </button>
+                    </form>
+
+                    {addMenuError ? <p className="error-line">{addMenuError}</p> : null}
+                    {addMenuResults.length > 0 ? (
+                      <div className="version-grid">
+                        {addMenuResults.map((row) => {
+                          const owned = ownedByScryfallId.get(row.scryfallId)
+                          const ownedTotal = (owned?.quantity ?? 0) + (owned?.foilQuantity ?? 0)
+                          return (
+                            <article key={`add-${row.scryfallId}`} className={`version-card ${ownedTotal > 0 ? 'owned' : 'unowned'}`}>
+                              <div className="version-image-wrap">
+                                <CardArtImage
+                                  key={resolveCardImageUrl(row.imageUrl, row.scryfallId) ?? 'no-image'}
+                                  src={resolveCardImageUrl(row.imageUrl, row.scryfallId)}
+                                  alt={`${row.name} ${row.setCode}`}
+                                />
+                              </div>
+                              <div className="version-body">
+                                <p>{row.name}</p>
+                                <p className="muted small">{row.setCode} #{row.collectorNumber} · {formatDate(row.releasedAt)}</p>
+                                <p className="muted small">{inferPrimaryType(row.typeLine)} · {colorIdentityLabel(row.colorIdentity)}</p>
+                                <p className="small">Owned: {owned?.quantity ?? 0} nonfoil / {owned?.foilQuantity ?? 0} foil</p>
+                                <div className="row-actions action-cluster">
+                                  <button className="button tiny action-mini" type="button" onClick={() => void handleAddMenuAdjust(row, false)}>+N</button>
+                                  <button className="button tiny subtle action-mini" type="button" onClick={() => void handleAddMenuAdjust(row, true)}>+F</button>
+                                  <button className="button tiny subtle action-mini" type="button" onClick={() => {
+                                    const nextAnchor: OwnedCard = owned ?? {
+                                      scryfallId: row.scryfallId,
+                                      name: row.name,
+                                      setCode: row.setCode.toLowerCase(),
+                                      collectorNumber: row.collectorNumber,
+                                      imageUrl: row.imageUrl ?? undefined,
+                                      typeLine: row.typeLine ?? null,
+                                      colorIdentity: row.colorIdentity,
+                                      manaValue: row.manaValue,
+                                      rarity: row.rarity,
+                                      quantity: 0,
+                                      foilQuantity: 0,
+                                      updatedAt: new Date().toISOString(),
+                                      tags: [],
+                                      currentPrice: row.marketPrice,
+                                      previousPrice: null,
+                                      priceDelta: null,
+                                      priceDirection: 'none',
+                                      lastPriceAt: null,
+                                      conditionCode: 'NM',
+                                      language: 'en',
+                                      locationName: null,
+                                      notes: null,
+                                      purchasePrice: null,
+                                      dateAdded: null,
+                                    }
+                                    void handleOpenVersions(nextAnchor)
+                                  }}>Versions</button>
+                                </div>
+                              </div>
+                            </article>
+                          )
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                  <aside className="submenu-side">
+                    <h4>Add Flow Guide</h4>
+                    <p className="muted small">Use card name or syntax, then add nonfoil or foil directly from results.</p>
+                    <ul className="submenu-hints">
+                      <li>Use quotes for exact names: <code>name:"Sol Ring"</code></li>
+                      <li>Use set filters: <code>set:mh3</code></li>
+                      <li>Click Versions to inspect all printings.</li>
+                    </ul>
+                    <p className="muted small">Matches: {addMenuResults.length}</p>
+                  </aside>
+                </div>
+              </div>
+            ) : null}
+
+            {modalMode === 'versions' && versionAnchor ? (
+              <div className="submenu-content">
+                {isLoadingVersions ? <p className="muted">Loading versions from Scryfall...</p> : null}
+                {versionError ? <p className="error-line">{versionError}</p> : null}
+                {!isLoadingVersions && !versionError ? (
+                  <div className="version-grid">
+                    {versionRows.map((row) => {
+                      const total = row.ownedQuantity + row.ownedFoilQuantity
+                      const owned = total > 0
+                      return (
+                        <article key={row.scryfallId} className={`version-card ${owned ? 'owned' : 'unowned'}`}>
+                          <div className="version-image-wrap">
+                            <CardArtImage
+                              key={resolveCardImageUrl(row.imageUrl, row.scryfallId) ?? 'no-image'}
+                              src={resolveCardImageUrl(row.imageUrl, row.scryfallId)}
+                              alt={`${versionAnchor.name} ${row.setCode}`}
+                            />
+                          </div>
+                          <div className="version-body">
+                            <p>{row.setCode} #{row.collectorNumber}</p>
+                            <p className="muted small">Released {formatDate(row.releasedAt)}</p>
+                            <p className="small">Owned: {row.ownedQuantity} nonfoil / {row.ownedFoilQuantity} foil</p>
+                            <div className="row-actions action-cluster">
+                              <button className="button tiny action-mini" type="button" onClick={() => void handleVersionAdjust(row, false, 1, versionAnchor.name)}>+N</button>
+                              <button className="button tiny subtle action-mini" type="button" onClick={() => void handleVersionAdjust(row, true, 1, versionAnchor.name)}>+F</button>
+                              <button className="button tiny subtle action-mini" type="button" disabled={row.ownedQuantity <= 0} onClick={() => void handleVersionAdjust(row, false, -1, versionAnchor.name)}>-N</button>
+                              <button className="button tiny subtle action-mini" type="button" disabled={row.ownedFoilQuantity <= 0} onClick={() => void handleVersionAdjust(row, true, -1, versionAnchor.name)}>-F</button>
+                            </div>
+                          </div>
+                        </article>
+                      )
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </section>
+        </div>,
+        document.body,
       ) : null}
     </section>
   )

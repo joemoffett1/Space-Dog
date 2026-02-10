@@ -4,6 +4,33 @@ import type { LocalAuthStatus } from '../lib/localAuth'
 import { clearPerfMetrics, getPerfMetrics } from '../lib/perfMetrics'
 import type { Profile } from '../types'
 
+const ASSET_CREDITS = [
+  {
+    name: 'Tabler Icons',
+    source: 'https://github.com/tabler/tabler-icons',
+    terms: 'MIT License',
+    usage: 'UI icon assets in /public/ui-icons.',
+  },
+  {
+    name: 'Google Fonts',
+    source: 'https://fonts.google.com/specimen/Space+Grotesk',
+    terms: 'Open Font License (family-specific terms on Google Fonts)',
+    usage: 'Primary UI typography (Space Grotesk + Orbitron).',
+  },
+  {
+    name: 'Scryfall API',
+    source: 'https://scryfall.com/docs/api',
+    terms: 'Use subject to Scryfall API terms and rate limits.',
+    usage: 'Card metadata, image URLs, market price references.',
+  },
+  {
+    name: 'Card Kingdom Public Pricelist',
+    source: 'https://api.cardkingdom.com/api/v2/pricelist',
+    terms: 'Use subject to provider terms/policies.',
+    usage: 'Buylist quote reporting.',
+  },
+]
+
 interface SettingsPageProps {
   activeProfile: Profile
   onReturnToCollection: () => void
@@ -168,6 +195,23 @@ export function SettingsPage({
           >
             Clear Perf History
           </button>
+        </article>
+
+        <article className="report-card">
+          <h3>Credits And Licenses</h3>
+          <p className="muted small">
+            Full attribution ledger: <code>ASSET_CREDITS.md</code>
+          </p>
+          <ul>
+            {ASSET_CREDITS.map((credit) => (
+              <li key={credit.name}>
+                <span>{credit.name}</span>
+                <p className="muted small">{credit.terms}</p>
+                <p className="muted small">Source: {credit.source}</p>
+                <p className="muted small">{credit.usage}</p>
+              </li>
+            ))}
+          </ul>
         </article>
       </div>
     </section>

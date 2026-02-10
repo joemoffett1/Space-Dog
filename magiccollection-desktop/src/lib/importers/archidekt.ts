@@ -81,6 +81,26 @@ function parseQuantity(raw: string): number {
   return Math.max(0, Math.floor(numeric))
 }
 
+function parseManaValue(raw: string): number | null {
+  const text = raw.trim()
+  if (!text) {
+    return null
+  }
+  const numeric = Number(text)
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return null
+  }
+  return numeric
+}
+
+function parseColorIdentity(raw: string): string[] {
+  const normalized = raw.toUpperCase()
+  const symbols = ['W', 'U', 'B', 'R', 'G']
+  return symbols.filter((symbol) =>
+    normalized.includes(symbol) || normalized.includes(`{${symbol}}`),
+  )
+}
+
 function isFoilFinish(raw: string): boolean {
   const normalized = raw.trim().toLowerCase()
   return normalized.includes('foil') || normalized.includes('etched')
@@ -103,6 +123,11 @@ export function parseArchidektCsv(csvText: string): ParseArchidektCsvResult {
   const idxScryfallId = headerMap.get('scryfall id')
   const idxCollectorNumber = headerMap.get('collector number')
   const idxTags = headerMap.get('tags')
+  const idxCardTypes = headerMap.get('card types')
+  const idxManaValue = headerMap.get('mana value')
+  const idxColors = headerMap.get('colors')
+  const idxColorIdentities = headerMap.get('color identities')
+  const idxRarity = headerMap.get('rarity')
 
   if (
     idxQuantity === undefined ||
@@ -134,6 +159,16 @@ export function parseArchidektCsv(csvText: string): ParseArchidektCsvResult {
     const collectorNumber = (row[idxCollectorNumber] ?? '').trim()
     const finish = idxFinish !== undefined ? row[idxFinish] ?? '' : ''
     const tags = idxTags !== undefined ? parseTags(row[idxTags] ?? '') : []
+    const typeLine = idxCardTypes !== undefined ? (row[idxCardTypes] ?? '').trim() : ''
+    const manaValue = idxManaValue !== undefined ? parseManaValue(row[idxManaValue] ?? '') : null
+    const colorIdentity = parseColorIdentity(
+      idxColorIdentities !== undefined
+        ? row[idxColorIdentities] ?? ''
+        : idxColors !== undefined
+          ? row[idxColors] ?? ''
+          : '',
+    )
+    const rarity = idxRarity !== undefined ? (row[idxRarity] ?? '').trim().toLowerCase() : ''
 
     if (!quantity || !name || !setCode || !collectorNumber || !looksLikeScryfallId(scryfallId)) {
       rowsSkipped += 1
@@ -150,6 +185,10 @@ export function parseArchidektCsv(csvText: string): ParseArchidektCsvResult {
         name,
         setCode,
         collectorNumber,
+        typeLine: typeLine || null,
+        colorIdentity: colorIdentity.length ? colorIdentity : undefined,
+        manaValue,
+        rarity: rarity || null,
         quantity: foil ? 0 : quantity,
         foilQuantity: foil ? quantity : 0,
         tags,
@@ -158,6 +197,18 @@ export function parseArchidektCsv(csvText: string): ParseArchidektCsvResult {
       existing.quantity += foil ? 0 : quantity
       existing.foilQuantity += foil ? quantity : 0
       existing.tags = [...new Set([...(existing.tags ?? []), ...tags])]
+      if (!existing.typeLine && typeLine) {
+        existing.typeLine = typeLine
+      }
+      if ((!existing.colorIdentity || !existing.colorIdentity.length) && colorIdentity.length) {
+        existing.colorIdentity = colorIdentity
+      }
+      if ((existing.manaValue ?? null) === null && manaValue !== null) {
+        existing.manaValue = manaValue
+      }
+      if (!existing.rarity && rarity) {
+        existing.rarity = rarity
+      }
     }
 
     rowsImported += 1

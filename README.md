@@ -6,31 +6,32 @@ It includes a quick summary, blockers, test focus, and a full changelog mirror.
 Last updated: 2026-02-09
 Current stage: `1.x.x-alpha`
 
+## Asset Attribution
+- Canonical file: `ASSET_CREDITS.md`
+- Every external visual/media asset and API-sourced media/data must list:
+- source URL
+- usage terms/license
+- attribution requirement
+- release notes
+
 ## Features Added (This Run)
-- Added `ARCHITECTURE.md` with full stack design, dependency inventory, and runtime data flows.
-- Rewrote `NEXT_STEPS.md` for desktop-prototype-first priorities with local-only sync focus.
+- Added free Tabler icon pack integration under `magiccollection-desktop/public/ui-icons`.
+- Added Archidekt-style popup submenus in Collection for `Add Card` and `Versions`.
+- Added in-app `Credits And Licenses` panel in Settings.
 
 ## Features Updated (This Run)
-- Added targeted code comments in complex paths (`App.tsx`, `catalogSync.ts`, `src-tauri/src/lib.rs`) to improve maintainability.
-- Kept prior auth/undo/CK features intact and validated with lint/build/check.
+- Updated typography to `Space Grotesk` + `Orbitron` and refreshed modal/button visuals.
+- Expanded attribution docs with concrete path-level entries for icon/font sources and terms.
 
 ## Blockers (Logged And Bypassed)
 - Group F blocker: cloud account server and mobile-store design are still pending.
 - Cloudflare deployment is intentionally deferred until desktop prototype sign-off.
 
 ## Things You Need To Test
-- Local auth flow:
-  - create local account on first launch
-  - sign out account from header
-  - sign back in and confirm collection profiles still load
-- Undo flow:
-  - perform quantity edits/remove/tag/metadata edits
-  - click `Undo` in Collection
-  - confirm the previous card state restores correctly
-- CK public buylist flow:
-  - open Reports
-  - click `Refresh CK Quotes`
-  - confirm provider shows `public` and payout totals populate
+- Open Collection -> `Add Card` and test search + +N/+F actions from popup.
+- Open Versions popup from image/text row and test +/- actions there.
+- Validate Settings -> `Credits And Licenses` content and source/terms text.
+- Confirm new icon assets and font look good at your target desktop resolution.
 
 ## Group Status
 1. Group A: `completed`
@@ -50,6 +51,50 @@ Versioning policy for alpha:
 - Increment `minor` (`x` in `1.x.0-alpha`) for new features.
 - Increment `patch` (`x` in `1.0.x-alpha`) for updates/fixes to existing features.
 - Use engineering discretion on feature vs update.
+
+## [1.18.0-alpha] - 2026-02-09
+### Added
+- Added free UI icon asset pack from Tabler Icons into `magiccollection-desktop/public/ui-icons`.
+- Added Archidekt-style popup submenu flow in Collection:
+- modal overlay with step-style tabs (`Add Card`, `Versions`)
+- quick add search submenu with Scryfall-backed query + +N/+F actions
+- versions submenu with owned-first sorting and direct +/- quantity controls
+- Added in-app `Credits And Licenses` section in Settings with source + usage-term summary.
+
+### Changed
+- Refreshed UI typography to `Space Grotesk` + `Orbitron` (Google Fonts).
+- Updated collection controls to use icon-assisted buttons and sleeker modal layout.
+- Expanded attribution ledger with concrete path-level entries for icon and font assets.
+
+## [1.17.1-alpha] - 2026-02-09
+### Added
+- Added root `ASSET_CREDITS.md` as the canonical source/terms ledger for assets and API-sourced media/data.
+- Documented explicit source + usage terms for:
+- app icon assets generated from user-provided artwork
+- Vite/React template assets
+- Scryfall and CK sourced runtime data/media
+- Added attribution policy requiring new third-party assets to be registered before release.
+
+### Changed
+- Added paw-theme visual treatment classes (`paw-pill`, `paw-icon-button`) and applied them to key controls.
+
+## [1.17.0-alpha] - 2026-02-09
+### Added
+- Added richer collection filtering with quick multi-select dropdown filters:
+- set
+- primary type
+- color identity
+- tags
+- condition
+- language
+- Added text-view field visibility toggles (show/hide columns for set, number, tags, price, trend).
+- Added direct version-panel quantity controls (`+N`, `+F`, `-N`, `-F`) for printings shown in the card-version drawer.
+- Added compact mode as a checkbox toggle (`Compact Rows`) rather than a separate view tab.
+
+### Changed
+- Collection image cards now show type/color identity hints (`type · color`) for faster scanability.
+- Market add/import pipelines now carry metadata fields (`typeLine`, `colorIdentity`, `manaValue`, `rarity`) into owned card records.
+- Rust backend now persists and returns owned-card metadata needed for richer local filtering.
 
 ## [1.16.2-alpha] - 2026-02-09
 ### Added

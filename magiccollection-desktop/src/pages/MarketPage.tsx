@@ -15,6 +15,10 @@ interface ScryfallCardResponse {
   name: string
   set: string
   collector_number: string
+  type_line?: string
+  color_identity?: string[]
+  cmc?: number
+  rarity?: string
   image_uris?: {
     normal?: string
   }
@@ -115,6 +119,10 @@ function toMarketCard(card: ScryfallCardResponse): MarketCard {
     setCode: card.set,
     collectorNumber: card.collector_number,
     imageUrl: card.image_uris?.normal ?? card.card_faces?.[0]?.image_uris?.normal,
+    typeLine: card.type_line ?? null,
+    colorIdentity: card.color_identity ?? [],
+    manaValue: typeof card.cmc === 'number' && Number.isFinite(card.cmc) ? card.cmc : null,
+    rarity: card.rarity ?? null,
     currentPrice: parseUsd(card.prices?.usd),
     previousPrice: null,
     priceDelta: null,
@@ -372,6 +380,24 @@ export default function MarketPage({
     window.localStorage.setItem(SAVED_QUERIES_KEY, JSON.stringify(next))
   }
 
+  function toAddInput(card: MarketCard, foil: boolean): MarketAddInput {
+    return {
+      scryfallId: card.scryfallId,
+      name: card.name,
+      setCode: card.setCode,
+      collectorNumber: card.collectorNumber,
+      imageUrl: card.imageUrl,
+      typeLine: card.typeLine ?? null,
+      colorIdentity:
+        card.colorIdentity && card.colorIdentity.length ? card.colorIdentity : undefined,
+      manaValue: card.manaValue ?? null,
+      rarity: card.rarity ?? null,
+      foil,
+      currentPrice: card.currentPrice,
+      tags: card.tags,
+    }
+  }
+
   const visibleResults = results.slice(0, visibleLimit)
 
   async function handleKeyboardAction(
@@ -385,30 +411,12 @@ export default function MarketPage({
     }
     if (event.key === '+') {
       event.preventDefault()
-      await onAddCard({
-        scryfallId: card.scryfallId,
-        name: card.name,
-        setCode: card.setCode,
-        collectorNumber: card.collectorNumber,
-        imageUrl: card.imageUrl,
-        foil: false,
-        currentPrice: card.currentPrice,
-        tags: card.tags,
-      })
+      await onAddCard(toAddInput(card, false))
       return
     }
     if (event.key.toLowerCase() === 'f') {
       event.preventDefault()
-      await onAddCard({
-        scryfallId: card.scryfallId,
-        name: card.name,
-        setCode: card.setCode,
-        collectorNumber: card.collectorNumber,
-        imageUrl: card.imageUrl,
-        foil: true,
-        currentPrice: card.currentPrice,
-        tags: card.tags,
-      })
+      await onAddCard(toAddInput(card, true))
     }
   }
 
@@ -570,36 +578,14 @@ export default function MarketPage({
                   <button
                     className="button tiny"
                     type="button"
-                    onClick={() =>
-                      onAddCard({
-                        scryfallId: card.scryfallId,
-                        name: card.name,
-                        setCode: card.setCode,
-                        collectorNumber: card.collectorNumber,
-                        imageUrl: card.imageUrl,
-                        foil: false,
-                        currentPrice: card.currentPrice,
-                        tags: card.tags,
-                      })
-                    }
+                    onClick={() => onAddCard(toAddInput(card, false))}
                   >
                     + Nonfoil
                   </button>
                   <button
                     className="button tiny subtle"
                     type="button"
-                    onClick={() =>
-                      onAddCard({
-                        scryfallId: card.scryfallId,
-                        name: card.name,
-                        setCode: card.setCode,
-                        collectorNumber: card.collectorNumber,
-                        imageUrl: card.imageUrl,
-                        foil: true,
-                        currentPrice: card.currentPrice,
-                        tags: card.tags,
-                      })
-                    }
+                    onClick={() => onAddCard(toAddInput(card, true))}
                   >
                     + Foil
                   </button>
@@ -666,36 +652,14 @@ export default function MarketPage({
                         <button
                           className="button tiny"
                           type="button"
-                          onClick={() =>
-                            onAddCard({
-                              scryfallId: row.scryfallId,
-                              name: row.name,
-                              setCode: row.setCode,
-                              collectorNumber: row.collectorNumber,
-                              imageUrl: row.imageUrl,
-                              foil: false,
-                              currentPrice: row.currentPrice,
-                              tags: row.tags,
-                            })
-                          }
+                          onClick={() => onAddCard(toAddInput(row, false))}
                         >
                           +N
                         </button>
                         <button
                           className="button tiny subtle"
                           type="button"
-                          onClick={() =>
-                            onAddCard({
-                              scryfallId: row.scryfallId,
-                              name: row.name,
-                              setCode: row.setCode,
-                              collectorNumber: row.collectorNumber,
-                              imageUrl: row.imageUrl,
-                              foil: true,
-                              currentPrice: row.currentPrice,
-                              tags: row.tags,
-                            })
-                          }
+                          onClick={() => onAddCard(toAddInput(row, true))}
                         >
                           +F
                         </button>

@@ -5,11 +5,11 @@ interface AppNavProps {
   onSelectTab: (tab: AppTab) => void
 }
 
-const TABS: Array<{ id: AppTab; label: string; helper: string }> = [
-  { id: 'collection', label: 'Collection', helper: 'Owned inventory' },
-  { id: 'market', label: 'Market', helper: 'All cards + add flow' },
-  { id: 'reports', label: 'Reports', helper: 'Stats and summaries' },
-  { id: 'settings', label: 'Settings', helper: 'Profile and app options' },
+const TABS: Array<{ id: AppTab; label: string; helper: string; glyph: string }> = [
+  { id: 'collection', label: 'Collection', helper: 'Owned inventory', glyph: 'C' },
+  { id: 'market', label: 'Market', helper: 'All cards + add flow', glyph: 'M' },
+  { id: 'reports', label: 'Reports', helper: 'Stats and summaries', glyph: 'R' },
+  { id: 'settings', label: 'Settings', helper: 'Profile and app options', glyph: 'S' },
 ]
 
 export function AppNav({ activeTab, onSelectTab }: AppNavProps) {
@@ -22,8 +22,13 @@ export function AppNav({ activeTab, onSelectTab }: AppNavProps) {
           onClick={() => onSelectTab(tab.id)}
           type="button"
         >
-          <span>{tab.label}</span>
-          <small>{tab.helper}</small>
+          <span className="tab-glyph" aria-hidden="true">
+            {tab.glyph}
+          </span>
+          <span className="tab-copy">
+            <span className="tab-label">{tab.label}</span>
+            <small>{tab.helper}</small>
+          </span>
         </button>
       ))}
     </nav>

@@ -8,6 +8,146 @@ Versioning policy for alpha:
 - Increment `patch` (`x` in `1.0.x-alpha`) for updates/fixes to existing features.
 - Use engineering discretion on feature vs update.
 
+## [1.20.5-alpha] - 2026-02-10
+### Added
+- Added Playwright E2E test harness in `magiccollection-desktop`:
+- `playwright.config.ts` with dual run mode support:
+  - web mode (auto-start Vite on `127.0.0.1:4173`)
+  - Tauri-attached mode (`PW_USE_TAURI=1`, target `127.0.0.1:1420`)
+- Added baseline smoke tests for:
+  - login-first gate visibility
+  - local account creation
+  - collection profile creation/open flow
+- Added `npm` scripts:
+  - `test:e2e`
+  - `test:e2e:headed`
+  - `test:e2e:ui`
+  - `test:e2e:tauri`
+- Added `tests/e2e/README.md` runbook and `.gitignore` entries for Playwright artifacts.
+
+## [1.20.4-alpha] - 2026-02-10
+### Changed
+- Reworked Collection search into an inline token editor:
+- active terms now appear inside the search control as editable colored boxes (instead of non-editable chips below).
+- each term can be edited directly or removed inline.
+- Added draft-term tokenization behavior so typing a space commits the current term box.
+- Updated suggestion targeting so autocomplete follows the currently active search box/draft input.
+- Hardened `t:` search matching to use:
+- inferred primary type
+- full `type_line` text
+- normalized tags fallback (for imports with sparse type metadata)
+
+## [1.20.3-alpha] - 2026-02-10
+### Changed
+- Completed the final open UI mockup delta item by adding token-kind color coding to active search chips (`set`, `tag`, `type`, `color`, `rarity`, `language`, `condition`, `mana`, `state`).
+- Upgraded token suggestion rows with token-kind accents for faster visual scan in the dropdown.
+- Added contextual filter-option suggestion mode for partial token prefixes so non-technical users get selectable options while typing:
+- `set:`
+- `tag:`
+- `t:` / `type:`
+- `c:` / `id:`
+- `lang:`
+- `cond:`
+- `rarity:`
+- Added context-aware empty-state messaging in the token dropdown (`No options match this filter...`) during prefix option mode.
+
+## [1.20.2-alpha] - 2026-02-10
+### Changed
+- Fixed image-view versions modal visibility/layering by rendering the modal overlay through a portal to `document.body`.
+- Hardened modal stacking with explicit modal positioning/z-index so the versions dialog reliably renders above blurred overlay state.
+
+## [1.20.1-alpha] - 2026-02-10
+### Changed
+- Fixed Versions modal layout regression by restoring the full-width versions grid for Step 2 (removed thumbnail-style side summary in that step).
+- Added explicit `Versions` action button on image-view cards for clearer/openable version access.
+- Fixed image-view click-through reliability by making overlay badges non-interactive (`pointer-events: none`).
+
+## [1.20.0-alpha] - 2026-02-10
+### Added
+- Completed major UI batch sweep across shell, collection views, modal flow, and interaction polish:
+- global top frame + branded header lockup
+- refined nav cards with glyph+label hierarchy
+- quick filter row (set/type/color) plus sort and price-source controls
+- table status strip (visible count, sort, density, source)
+- modal step progress rail + guided side panels for Add/Versions flows
+- versions side summary card with printing/ownership rollups
+- gallery overlays for quantity/foil/version badges
+- Added stronger accessibility affordances:
+- global focus-visible ring treatment
+- themed scrollbars
+- reduced-motion fallback behavior
+
+### Changed
+- Tightened table typography and spacing for better dense-data readability.
+- Upgraded action cluster ergonomics in table and modal cards (`+N/+F/-N/-F`, edit/remove grouping).
+- Updated image-card and version-card hover/focus motion to feel more intentional.
+- Updated `NEXT_STEPS.md` UI A-F groups and marked 4 UI batches complete with one remaining partial item.
+
+## [1.19.1-alpha] - 2026-02-09
+### Changed
+- Refined Collection toolbar layout into grouped controls for cleaner spacing and improved readability.
+- Added row density control (`Comfortable`, `Balanced`, `Dense`) that updates virtual row height and image-grid density.
+- Added active search-token chips under search (click to remove token quickly).
+- Added responsive polish for the new toolbar/search layout on smaller viewports.
+
+## [1.19.0-alpha] - 2026-02-09
+### Added
+- Added Collection search token autocomplete backed by SQLite `filter_tokens` + fallback seed tokens:
+- supports suggestions for `set:`, `t:`, `tag:`, `c:`, `id:`, `rarity:`, `lang:`, `cond:`, `mv>=`, `is:foil`, `is:nonfoil`
+- keyboard navigation for suggestions (`Up/Down`, `Enter`, `Tab`, `Esc`)
+- Added syntax-aware Collection filtering parser (Scryfall-style subset + internal fields) on top of existing quick filters.
+- Added text-view mini art thumbnails in the first column to improve scanability in dense table mode.
+- Added resilient card-image fallback rendering in image/text/modal cards to avoid broken-image tiles.
+
+### Changed
+- Hooked frontend token query payload to Tauri command input shape (`get_filter_tokens` now receives `input` object).
+- Added/finished filter-token sync updates in Rust mutation flows, including `set_owned_card_state`.
+- Updated Collection search placeholder/help text to advertise supported syntax operators.
+
+## [1.18.0-alpha] - 2026-02-09
+### Added
+- Added free UI icon asset pack from Tabler Icons into `magiccollection-desktop/public/ui-icons`.
+- Added Archidekt-style popup submenu flow in Collection:
+- modal overlay with step-style tabs (`Add Card`, `Versions`)
+- quick add search submenu with Scryfall-backed query + +N/+F actions
+- versions submenu with owned-first sorting and direct +/- quantity controls
+- Added in-app `Credits And Licenses` section in Settings with source + usage-term summary.
+
+### Changed
+- Refreshed UI typography to `Space Grotesk` + `Orbitron` (Google Fonts).
+- Updated collection controls to use icon-assisted buttons and sleeker modal layout.
+- Expanded attribution ledger with concrete path-level entries for icon and font assets.
+
+## [1.17.1-alpha] - 2026-02-09
+### Added
+- Added root `ASSET_CREDITS.md` as the canonical source/terms ledger for assets and API-sourced media/data.
+- Documented explicit source + usage terms for:
+- app icon assets generated from user-provided artwork
+- Vite/React template assets
+- Scryfall and CK sourced runtime data/media
+- Added attribution policy requiring new third-party assets to be registered before release.
+
+### Changed
+- Added paw-theme visual treatment classes (`paw-pill`, `paw-icon-button`) and applied them to key controls.
+
+## [1.17.0-alpha] - 2026-02-09
+### Added
+- Added richer collection filtering with quick multi-select dropdown filters:
+- set
+- primary type
+- color identity
+- tags
+- condition
+- language
+- Added text-view field visibility toggles (show/hide columns for set, number, tags, price, trend).
+- Added direct version-panel quantity controls (`+N`, `+F`, `-N`, `-F`) for printings shown in the card-version drawer.
+- Added compact mode as a checkbox toggle (`Compact Rows`) rather than a separate view tab.
+
+### Changed
+- Collection image cards now show type/color identity hints (`type · color`) for faster scanability.
+- Market add/import pipelines now carry metadata fields (`typeLine`, `colorIdentity`, `manaValue`, `rarity`) into owned card records.
+- Rust backend now persists and returns owned-card metadata needed for richer local filtering.
+
 ## [1.16.2-alpha] - 2026-02-09
 ### Added
 - Added root `ARCHITECTURE.md` covering:
