@@ -106,6 +106,7 @@ export interface CollectionImportRow {
   name: string
   setCode: string
   collectorNumber: string
+  imageUrl?: string | null
   typeLine?: string | null
   colorIdentity?: string[]
   manaValue?: number | null
@@ -113,6 +114,12 @@ export interface CollectionImportRow {
   quantity: number
   foilQuantity: number
   tags?: string[]
+  locationName?: string | null
+  conditionCode?: string
+  language?: string
+  notes?: string | null
+  purchasePrice?: number | null
+  dateAdded?: string | null
 }
 
 export interface CollectionImportResult {

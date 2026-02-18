@@ -1,0 +1,864 @@
+[
+  {
+    "function": "init_database",
+    "line": 541,
+    "call": "execute",
+    "sql": "PRAGMA foreign_keys = ON;",
+    "tables": []
+  },
+  {
+    "function": "init_database",
+    "line": 545,
+    "call": "execute",
+    "sql": "CREATE TABLE IF NOT EXISTS _app_migrations (\n         name TEXT PRIMARY KEY,\n         applied_at TEXT NOT NULL\n       )",
+    "tables": [
+      "IF"
+    ]
+  },
+  {
+    "function": "is_fresh_database",
+    "line": 585,
+    "call": "query_row",
+    "sql": "SELECT COUNT(*)\n       FROM sqlite_master\n       WHERE type = 'table'\n         AND name NOT LIKE 'sqlite_%'\n         AND name <> '_app_migrations'",
+    "tables": [
+      "sqlite_master"
+    ]
+  },
+  {
+    "function": "mark_migration_applied",
+    "line": 600,
+    "call": "execute",
+    "sql": "INSERT OR IGNORE INTO _app_migrations (name, applied_at) VALUES (?1, ?2)",
+    "tables": [
+      "_app_migrations"
+    ]
+  },
+  {
+    "function": "apply_migration_once",
+    "line": 610,
+    "call": "query_row",
+    "sql": "SELECT name FROM _app_migrations WHERE name = ?1 LIMIT 1",
+    "tables": [
+      "_app_migrations"
+    ]
+  },
+  {
+    "function": "apply_migration_once",
+    "line": 622,
+    "call": "execute",
+    "sql": "INSERT INTO _app_migrations (name, applied_at) VALUES (?1, ?2)",
+    "tables": [
+      "_app_migrations"
+    ]
+  },
+  {
+    "function": "open_database",
+    "line": 632,
+    "call": "execute",
+    "sql": "PRAGMA foreign_keys = ON;",
+    "tables": []
+  },
+  {
+    "function": "read_catalog_sync_row",
+    "line": 699,
+    "call": "query_row",
+    "sql": "SELECT current_version, state_hash, synced_at\n       FROM system_data_sync_client_sync_state\n       WHERE client_id = ?1\n         AND dataset_name = ?2\n       LIMIT 1",
+    "tables": [
+      "system_data_sync_client_sync_state"
+    ]
+  },
+  {
+    "function": "count_catalog_records_for_version",
+    "line": 716,
+    "call": "query_row",
+    "sql": "SELECT COUNT(DISTINCT printing_id)\n       FROM card_data_card_prices\n       WHERE sync_version = ?1\n         AND tcg_market IS NOT NULL",
+    "tables": [
+      "card_data_card_prices"
+    ]
+  },
+  {
+    "function": "count_catalog_records",
+    "line": 736,
+    "call": "query_row",
+    "sql": "SELECT COUNT(DISTINCT printing_id)\n       FROM card_data_card_prices\n       WHERE sync_version = ?1\n         AND tcg_market IS NOT NULL",
+    "tables": [
+      "card_data_card_prices"
+    ]
+  },
+  {
+    "function": "write_catalog_sync_state",
+    "line": 755,
+    "call": "execute",
+    "sql": "INSERT INTO system_data_sync_client_sync_state\n         (client_id, dataset_name, current_version, state_hash, synced_at, updated_at)\n       VALUES (?1, ?2, ?3, ?4, ?5, ?5)\n       ON CONFLICT(client_id, dataset_name) DO UPDATE SET\n         current_version = excluded.current_version,\n         state_hash = excluded.state_hash,\n         synced_at = excluded.synced_at,\n         updated_at = excluded.updated_at",
+    "tables": [
+      "SET",
+      "system_data_sync_client_sync_state"
+    ]
+  },
+  {
+    "function": "write_catalog_sync_state",
+    "line": 773,
+    "call": "execute",
+    "sql": "INSERT INTO system_data_sync_dataset_versions\n             (id, source_id, dataset_name, build_version, state_hash, record_count, created_at)\n           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)\n           ON CONFLICT(id) DO UPDATE SET\n             state_hash = excluded.state_hash,\n             record_count = excluded.record_count,\n             created_at = excluded.created_at",
+    "tables": [
+      "SET",
+      "system_data_sync_dataset_versions"
+    ]
+  },
+  {
+    "function": "upsert_catalog_record",
+    "line": 832,
+    "call": "execute",
+    "sql": "INSERT INTO card_data_sets (set_code, set_name, updated_at)\n       VALUES (?1, ?2, ?3)\n       ON CONFLICT(set_code) DO UPDATE SET\n         set_name = COALESCE(NULLIF(excluded.set_name, ''), card_data_sets.set_name),\n         updated_at = excluded.updated_at",
+    "tables": [
+      "SET",
+      "card_data_sets"
+    ]
+  },
+  {
+    "function": "upsert_catalog_record",
+    "line": 843,
+    "call": "query_row",
+    "sql": "SELECT card_id\n       FROM card_data_printings\n       WHERE id = ?1\n       LIMIT 1",
+    "tables": [
+      "card_data_printings"
+    ]
+  },
+  {
+    "function": "upsert_catalog_record",
+    "line": 856,
+    "call": "execute",
+    "sql": "INSERT INTO card_data_cards (\n         id, oracle_id, name, mana_cost, cmc, type_line, oracle_text, reserved,\n         keywords_json, colors_json, color_identity_json, latest_released_at, created_at, updated_at\n       )\n       VALUES (?1, NULL, ?2, NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL, NULL, ?3, ?3)\n       ON CONFLICT(id) DO UPDATE SET\n         name = excluded.name,\n         updated_at = excluded.updated_at",
+    "tables": [
+      "SET",
+      "card_data_cards"
+    ]
+  },
+  {
+    "function": "upsert_catalog_record",
+    "line": 870,
+    "call": "execute",
+    "sql": "INSERT INTO card_data_printings (\n          id, card_id, oracle_id, set_code, collector_number, lang, rarity, layout, released_at, artist,\n          image_normal_url, image_small_url, image_art_crop_url, image_png_url, is_token, is_digital,\n          is_foil_available, is_nonfoil_available, tcgplayer_id, cardmarket_id, mtgo_id, mtgo_foil_id,\n          created_at, updated_at\n        )\n        VALUES (?1, ?2, NULL, ?3, ?4, 'en', NULL, NULL, NULL, NULL, ?5, NULL, NULL, NULL, 0, 0, 1, 1, NULL, NULL, NULL, NULL, ?6, ?6)\n        ON CONFLICT(id) DO UPDATE SET\n          card_id = COALESCE(card_data_printings.card_id, excluded.card_id),\n          set_code = excluded.set_code,\n          collector_number = excluded.collector_number,\n          image_normal_url = COALESCE(excluded.image_normal_url, card_data_printings.image_normal_url),\n          updated_at = excluded.updated_at",
+    "tables": [
+      "SET",
+      "card_data_printings"
+    ]
+  },
+  {
+    "function": "compute_catalog_state_hash",
+    "line": 926,
+    "call": "prepare",
+    "sql": "SELECT p.id, c.name, p.set_code, p.collector_number, COALESCE(p.image_normal_url, ''), cp.tcg_market, cp.captured_at\n       FROM card_data_card_prices cp\n       JOIN card_data_printings p ON p.id = cp.printing_id\n       JOIN card_data_cards c ON c.id = p.card_id\n       WHERE cp.sync_version = ?1\n         AND cp.tcg_market IS NOT NULL\n       ORDER BY p.id",
+    "tables": [
+      "card_data_card_prices",
+      "card_data_cards",
+      "card_data_printings"
+    ]
+  },
+  {
+    "function": "append_catalog_patch_history",
+    "line": 978,
+    "call": "execute",
+    "sql": "INSERT INTO system_data_sync_patches (\n         id, source_id, dataset_name, from_version, to_version, patch_hash,\n         strategy, added_count, updated_count, removed_count, artifact_uri, created_at\n       )\n       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, ?11)",
+    "tables": [
+      "system_data_sync_patches"
+    ]
+  },
+  {
+    "function": "append_catalog_patch_history",
+    "line": 1001,
+    "call": "execute",
+    "sql": "INSERT INTO system_data_sync_patch_apply_history (\n         id, client_id, dataset_name, from_version, to_version, strategy,\n         duration_ms, result, error_message, applied_at\n       )\n       VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, 'success', NULL, ?7)",
+    "tables": [
+      "system_data_sync_patch_apply_history"
+    ]
+  },
+  {
+    "function": "ensure_profile_exists",
+    "line": 1037,
+    "call": "query_row",
+    "sql": "SELECT display_name\n       FROM collection_data_profiles\n       WHERE id = ?1\n       LIMIT 1",
+    "tables": [
+      "collection_data_profiles"
+    ]
+  },
+  {
+    "function": "ensure_profile_exists",
+    "line": 1053,
+    "call": "query_row",
+    "sql": "SELECT id\n       FROM collection_data_collections\n       WHERE id = ?1\n       LIMIT 1",
+    "tables": [
+      "collection_data_collections"
+    ]
+  },
+  {
+    "function": "ensure_profile_exists",
+    "line": 1073,
+    "call": "execute",
+    "sql": "INSERT INTO collection_data_collections\n           (id, profile_id, name, description, visibility, created_at, updated_at)\n         VALUES (?1, ?1, ?2, NULL, 'private', ?3, ?3)",
+    "tables": [
+      "collection_data_collections"
+    ]
+  },
+  {
+    "function": "ensure_card_and_printing",
+    "line": 1140,
+    "call": "execute",
+    "sql": "INSERT INTO card_data_sets (set_code, set_name, updated_at)\n       VALUES (?1, ?2, ?3)\n       ON CONFLICT(set_code) DO UPDATE SET\n         set_name = excluded.set_name,\n         updated_at = excluded.updated_at",
+    "tables": [
+      "SET",
+      "card_data_sets"
+    ]
+  },
+  {
+    "function": "ensure_card_and_printing",
+    "line": 1151,
+    "call": "query_row",
+    "sql": "SELECT card_id\n       FROM card_data_printings\n       WHERE id = ?1\n       LIMIT 1",
+    "tables": [
+      "card_data_printings"
+    ]
+  },
+  {
+    "function": "ensure_card_and_printing",
+    "line": 1164,
+    "call": "execute",
+    "sql": "INSERT INTO card_data_cards (\n         id, oracle_id, name, mana_cost, cmc, type_line, oracle_text, reserved,\n         keywords_json, colors_json, color_identity_json, latest_released_at, created_at, updated_at\n       )\n       VALUES (?1, NULL, ?2, NULL, ?3, ?4, NULL, 0, NULL, NULL, ?5, NULL, ?6, ?6)\n       ON CONFLICT(id) DO UPDATE SET\n         name = excluded.name,\n         type_line = COALESCE(excluded.type_line, card_data_cards.type_line),\n         color_identity_json = COALESCE(excluded.color_identity_json, card_data_cards.color_identity_json),\n         cmc = COALESCE(excluded.cmc, card_data_cards.cmc),\n         updated_at = excluded.updated_at",
+    "tables": [
+      "SET",
+      "card_data_cards"
+    ]
+  },
+  {
+    "function": "ensure_card_and_printing",
+    "line": 1188,
+    "call": "execute",
+    "sql": "INSERT INTO card_data_printings (\n          id, card_id, oracle_id, set_code, collector_number, lang, rarity, layout, released_at, artist,\n          image_normal_url, image_small_url, image_art_crop_url, image_png_url, is_token, is_digital,\n          is_foil_available, is_nonfoil_available, tcgplayer_id, cardmarket_id, mtgo_id, mtgo_foil_id,\n          created_at, updated_at\n        )\n        VALUES (?1, ?2, NULL, ?3, ?4, 'en', ?5, NULL, NULL, NULL, ?6, ?6, ?6, NULL, 0, 0, 1, 1, NULL, NULL, NULL, NULL, ?7, ?7)\n        ON CONFLICT(id) DO UPDATE SET\n          card_id = COALESCE(card_data_printings.card_id, excluded.card_id),\n          set_code = CASE\n            WHEN excluded.set_code = 'unknown' THEN card_data_printings.set_code\n            ELSE excluded.set_code\n          END,\n          collector_number = CASE\n            WHEN excluded.collector_number = '0' THEN card_data_printings.collector_number\n            ELSE excluded.collector_number\n          END,\n          rarity = COALESCE(excluded.rarity, card_data_printings.rarity),\n          image_normal_url = COALESCE(excluded.image_normal_url, card_data_printings.image_normal_url),\n          image_small_url = COALESCE(excluded.image_small_url, card_data_printings.image_small_url),\n          image_art_crop_url = COALESCE(excluded.image_art_crop_url, card_data_printings.image_art_crop_url),\n          updated_at = excluded.updated_at",
+    "tables": [
+      "SET",
+      "card_data_printings"
+    ]
+  },
+  {
+    "function": "upsert_tags_for_owned_item",
+    "line": 1233,
+    "call": "execute",
+    "sql": "DELETE FROM collection_data_collection_item_tags WHERE collection_item_id = ?1",
+    "tables": [
+      "collection_data_collection_item_tags"
+    ]
+  },
+  {
+    "function": "upsert_tags_for_owned_item",
+    "line": 1241,
+    "call": "query_row",
+    "sql": "SELECT id\n         FROM collection_data_tags\n         WHERE collection_id = ?1\n           AND lower(name) = lower(?2)\n         LIMIT 1",
+    "tables": [
+      "collection_data_tags"
+    ]
+  },
+  {
+    "function": "upsert_tags_for_owned_item",
+    "line": 1258,
+    "call": "execute",
+    "sql": "INSERT INTO collection_data_tags (id, collection_id, name, color_hex, created_at)\n           VALUES (?1, ?2, ?3, NULL, ?4)",
+    "tables": [
+      "collection_data_tags"
+    ]
+  },
+  {
+    "function": "upsert_tags_for_owned_item",
+    "line": 1268,
+    "call": "execute",
+    "sql": "INSERT OR IGNORE INTO collection_data_collection_item_tags (collection_item_id, tag_id, created_at)\n         VALUES (?1, ?2, ?3)",
+    "tables": [
+      "collection_data_collection_item_tags"
+    ]
+  },
+  {
+    "function": "load_tags_for_owned_item",
+    "line": 1281,
+    "call": "prepare",
+    "sql": "SELECT t.name\n       FROM collection_data_collection_item_tags oit\n       JOIN collection_data_tags t ON t.id = oit.tag_id\n       WHERE oit.collection_item_id = ?1\n       ORDER BY t.name COLLATE NOCASE",
+    "tables": [
+      "collection_data_collection_item_tags",
+      "collection_data_tags"
+    ]
+  },
+  {
+    "function": "build_price_trend_by_column",
+    "line": 1343,
+    "call": "sql_literal",
+    "sql": "SELECT {col}, captured_at\n     FROM card_data_card_prices\n     WHERE printing_id = ?1\n       AND {col} IS NOT NULL\n     ORDER BY captured_at DESC\n     LIMIT 2",
+    "tables": [
+      "card_data_card_prices"
+    ]
+  },
+  {
+    "function": "load_collection_price_trends_by_source",
+    "line": 1394,
+    "call": "sql_literal",
+    "sql": "SELECT DISTINCT\n       ci.printing_id,\n       (\n         SELECT cp.{col}\n         FROM card_data_card_prices cp\n         WHERE cp.printing_id = ci.printing_id\n           AND cp.{col} IS NOT NULL\n         ORDER BY cp.captured_at DESC\n         LIMIT 1\n       ) AS current_price,\n       (\n         SELECT cp.{col}\n         FROM card_data_card_prices cp\n         WHERE cp.printing_id = ci.printing_id\n           AND cp.{col} IS NOT NULL\n         ORDER BY cp.captured_at DESC\n         LIMIT 1 OFFSET 1\n       ) AS previous_price,\n       (\n         SELECT cp.captured_at\n         FROM card_data_card_prices cp\n         WHERE cp.printing_id = ci.printing_id\n           AND cp.{col} IS NOT NULL\n         ORDER BY cp.captured_at DESC\n         LIMIT 1\n       ) AS last_price_at\n     FROM collection_data_collection_items ci\n     WHERE ci.collection_id = ?1\n       AND (ci.quantity_nonfoil > 0 OR ci.quantity_foil > 0)",
+    "tables": [
+      "card_data_card_prices",
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "upsert_compact_price_row",
+    "line": 1558,
+    "call": "execute",
+    "sql": "INSERT INTO card_data_card_prices (\n         printing_id, condition_id, finish_id,\n         tcg_low, tcg_market, tcg_high,\n         ck_sell, ck_buylist, ck_buylist_quantity_cap,\n         sync_version, captured_ymd, captured_at, created_at\n       )\n       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)\n       ON CONFLICT(\n         printing_id,\n         IFNULL(condition_id, 0),\n         IFNULL(finish_id, 0),\n         sync_version\n       ) DO UPDATE SET\n         tcg_low = COALESCE(excluded.tcg_low, card_data_card_prices.tcg_low),\n         tcg_market = COALESCE(excluded.tcg_market, card_data_card_prices.tcg_market),\n         tcg_high = COALESCE(excluded.tcg_high, card_data_card_prices.tcg_high),\n         ck_sell = COALESCE(excluded.ck_sell, card_data_card_prices.ck_sell),\n         ck_buylist = COALESCE(excluded.ck_buylist, card_data_card_prices.ck_buylist),\n         ck_buylist_quantity_cap = COALESCE(excluded.ck_buylist_quantity_cap, card_data_card_prices.ck_buylist_quantity_cap),\n         captured_ymd = excluded.captured_ymd,\n         captured_at = excluded.captured_at,\n         created_at = excluded.created_at",
+    "tables": [
+      "SET",
+      "card_data_card_prices"
+    ]
+  },
+  {
+    "function": "list_missing_metadata_scryfall_ids",
+    "line": 1788,
+    "call": "prepare",
+    "sql": "SELECT DISTINCT ci.printing_id\n       FROM collection_data_collection_items ci\n       JOIN card_data_printings p ON p.id = ci.printing_id\n       JOIN card_data_cards c ON c.id = p.card_id\n       WHERE ci.collection_id = ?1\n         AND (ci.quantity_nonfoil > 0 OR ci.quantity_foil > 0)\n         AND (\n           c.type_line IS NULL OR trim(c.type_line) = ''\n           OR c.color_identity_json IS NULL\n           OR c.cmc IS NULL\n           OR p.rarity IS NULL OR trim(p.rarity) = ''\n         )\n       LIMIT ?2",
+    "tables": [
+      "card_data_cards",
+      "card_data_printings",
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "count_missing_metadata_rows",
+    "line": 1818,
+    "call": "query_row",
+    "sql": "SELECT count(*)\n       FROM collection_data_collection_items ci\n       JOIN card_data_printings p ON p.id = ci.printing_id\n       JOIN card_data_cards c ON c.id = p.card_id\n       WHERE ci.collection_id = ?1\n         AND (ci.quantity_nonfoil > 0 OR ci.quantity_foil > 0)\n         AND (\n           c.type_line IS NULL OR trim(c.type_line) = ''\n           OR c.color_identity_json IS NULL\n           OR c.cmc IS NULL\n           OR p.rarity IS NULL OR trim(p.rarity) = ''\n         )",
+    "tables": [
+      "card_data_cards",
+      "card_data_printings",
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "ensure_sync_source",
+    "line": 1936,
+    "call": "execute",
+    "sql": "INSERT INTO system_data_sync_data_sources (id, kind, base_url, enabled, refresh_window_utc, updated_at)\n       VALUES (?1, ?2, ?3, 1, ?4, ?5)\n       ON CONFLICT(id) DO UPDATE SET\n         kind = excluded.kind,\n         base_url = excluded.base_url,\n         enabled = 1,\n         refresh_window_utc = excluded.refresh_window_utc,\n         updated_at = excluded.updated_at",
+    "tables": [
+      "SET",
+      "system_data_sync_data_sources"
+    ]
+  },
+  {
+    "function": "write_source_sync_record",
+    "line": 1962,
+    "call": "execute",
+    "sql": "INSERT INTO system_data_sync_dataset_versions\n         (id, source_id, dataset_name, build_version, state_hash, record_count, created_at)\n       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)\n       ON CONFLICT(id) DO UPDATE SET\n         state_hash = excluded.state_hash,\n         record_count = excluded.record_count,\n         created_at = excluded.created_at",
+    "tables": [
+      "SET",
+      "system_data_sync_dataset_versions"
+    ]
+  },
+  {
+    "function": "write_source_sync_record",
+    "line": 1983,
+    "call": "execute",
+    "sql": "INSERT INTO system_data_sync_client_sync_state\n         (client_id, dataset_name, current_version, state_hash, synced_at, updated_at)\n       VALUES (?1, ?2, ?3, ?4, ?5, ?5)\n       ON CONFLICT(client_id, dataset_name) DO UPDATE SET\n         current_version = excluded.current_version,\n         state_hash = excluded.state_hash,\n         synced_at = excluded.synced_at,\n         updated_at = excluded.updated_at",
+    "tables": [
+      "SET",
+      "system_data_sync_client_sync_state"
+    ]
+  },
+  {
+    "function": "upsert_scryfall_oracle_if_changed",
+    "line": 2132,
+    "call": "execute",
+    "sql": "INSERT INTO card_data_sets (set_code, set_name, updated_at)\n       VALUES (?1, ?2, ?3)\n       ON CONFLICT(set_code) DO UPDATE SET\n         set_name = excluded.set_name,\n         updated_at = excluded.updated_at",
+    "tables": [
+      "SET",
+      "card_data_sets"
+    ]
+  },
+  {
+    "function": "upsert_scryfall_oracle_if_changed",
+    "line": 2143,
+    "call": "query_row",
+    "sql": "SELECT card_id FROM card_data_printings WHERE id = ?1 LIMIT 1",
+    "tables": [
+      "card_data_printings"
+    ]
+  },
+  {
+    "function": "upsert_scryfall_oracle_if_changed",
+    "line": 2154,
+    "call": "execute",
+    "sql": "INSERT INTO card_data_cards (\n         id, oracle_id, name, mana_cost, cmc, type_line, oracle_text, reserved,\n         keywords_json, colors_json, color_identity_json, latest_released_at, created_at, updated_at\n       )\n       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13)\n       ON CONFLICT(id) DO NOTHING",
+    "tables": [
+      "card_data_cards"
+    ]
+  },
+  {
+    "function": "upsert_scryfall_oracle_if_changed",
+    "line": 2180,
+    "call": "execute",
+    "sql": "INSERT INTO card_data_printings (\n          id, card_id, oracle_id, set_code, collector_number, lang, rarity, layout, released_at, artist,\n          image_normal_url, image_small_url, image_art_crop_url, image_png_url, is_token, is_digital,\n          is_foil_available, is_nonfoil_available, tcgplayer_id, cardmarket_id, mtgo_id, mtgo_foil_id,\n          created_at, updated_at\n        )\n        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL, 0, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?21)\n        ON CONFLICT(id) DO NOTHING",
+    "tables": [
+      "card_data_printings"
+    ]
+  },
+  {
+    "function": "upsert_scryfall_oracle_if_changed",
+    "line": 2216,
+    "call": "query_row",
+    "sql": "SELECT\n         COALESCE(c.name, ''),\n         COALESCE(c.mana_cost, ''),\n         COALESCE(c.type_line, ''),\n         COALESCE(c.oracle_text, ''),\n         COALESCE(c.cmc, -1),\n         COALESCE(c.reserved, 0),\n         COALESCE(c.keywords_json, ''),\n         COALESCE(c.colors_json, ''),\n         COALESCE(c.color_identity_json, ''),\n         COALESCE(c.latest_released_at, ''),\n         COALESCE(p.set_code, ''),\n         COALESCE(p.collector_number, ''),\n         COALESCE(p.lang, ''),\n         COALESCE(p.rarity, ''),\n         COALESCE(p.layout, ''),\n         COALESCE(p.released_at, ''),\n         COALESCE(p.artist, ''),\n         COALESCE(p.image_normal_url, ''),\n         COALESCE(p.image_small_url, ''),\n         COALESCE(p.image_art_crop_url, ''),\n         COALESCE(p.is_digital, 0),\n         COALESCE(p.is_foil_available, 0),\n         COALESCE(p.is_nonfoil_available, 0),\n         COALESCE(p.tcgplayer_id, -1),\n         COALESCE(p.cardmarket_id, -1),\n         COALESCE(p.mtgo_id, -1),\n         COALESCE(p.mtgo_foil_id, -1)\n       FROM card_data_printings p\n       JOIN card_data_cards c ON c.id = p.card_id\n       WHERE p.id = ?1\n       LIMIT 1",
+    "tables": [
+      "card_data_cards",
+      "card_data_printings"
+    ]
+  },
+  {
+    "function": "upsert_scryfall_oracle_if_changed",
+    "line": 2411,
+    "call": "execute",
+    "sql": "UPDATE card_data_cards\n       SET oracle_id = ?1,\n           name = ?2,\n           mana_cost = ?3,\n           cmc = ?4,\n           type_line = ?5,\n           oracle_text = ?6,\n           reserved = ?7,\n           keywords_json = ?8,\n           colors_json = ?9,\n           color_identity_json = ?10,\n           latest_released_at = ?11,\n           updated_at = ?12\n       WHERE id = ?13",
+    "tables": [
+      "card_data_cards"
+    ]
+  },
+  {
+    "function": "upsert_scryfall_oracle_if_changed",
+    "line": 2445,
+    "call": "execute",
+    "sql": "UPDATE card_data_printings\n       SET oracle_id = ?1,\n           set_code = ?2,\n           collector_number = ?3,\n           lang = ?4,\n           rarity = ?5,\n           layout = ?6,\n           released_at = ?7,\n           artist = ?8,\n           image_normal_url = ?9,\n           image_small_url = ?10,\n           image_art_crop_url = ?11,\n           is_digital = ?12,\n           is_foil_available = ?13,\n           is_nonfoil_available = ?14,\n           tcgplayer_id = ?15,\n           cardmarket_id = ?16,\n           mtgo_id = ?17,\n           mtgo_foil_id = ?18,\n           updated_at = ?19\n       WHERE id = ?20",
+    "tables": [
+      "card_data_printings"
+    ]
+  },
+  {
+    "function": "hydrate_printing_metadata_batch",
+    "line": 2568,
+    "call": "execute",
+    "sql": "UPDATE card_data_cards\n         SET type_line = COALESCE(?1, type_line),\n             color_identity_json = COALESCE(?2, color_identity_json),\n             cmc = COALESCE(?3, cmc),\n             updated_at = ?4\n         WHERE id = (SELECT card_id FROM card_data_printings WHERE id = ?5 LIMIT 1)",
+    "tables": [
+      "card_data_cards",
+      "card_data_printings"
+    ]
+  },
+  {
+    "function": "hydrate_printing_metadata_batch",
+    "line": 2580,
+    "call": "execute",
+    "sql": "UPDATE card_data_printings\n         SET rarity = COALESCE(?1, rarity),\n             image_normal_url = COALESCE(?2, image_normal_url),\n             image_small_url = COALESCE(?3, image_small_url),\n             image_art_crop_url = COALESCE(?4, image_art_crop_url),\n             updated_at = ?5\n         WHERE id = ?6",
+    "tables": [
+      "card_data_printings"
+    ]
+  },
+  {
+    "function": "collect_filter_tokens",
+    "line": 2739,
+    "call": "prepare",
+    "sql": "SELECT DISTINCT lower(p.set_code)\n       FROM collection_data_collection_items ci\n       JOIN card_data_printings p ON p.id = ci.printing_id\n       WHERE (?1 IS NULL OR ci.collection_id = ?1)\n         AND (ci.quantity_nonfoil > 0 OR ci.quantity_foil > 0)",
+    "tables": [
+      "card_data_printings",
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "collect_filter_tokens",
+    "line": 2766,
+    "call": "prepare",
+    "sql": "SELECT DISTINCT lower(t.name), t.name\n       FROM collection_data_tags t\n       WHERE (?1 IS NULL OR t.collection_id = ?1)\n         AND lower(t.name) NOT IN ('owned', 'foil', 'playset')\n       ORDER BY t.name COLLATE NOCASE",
+    "tables": [
+      "collection_data_tags"
+    ]
+  },
+  {
+    "function": "collect_filter_tokens",
+    "line": 2792,
+    "call": "prepare",
+    "sql": "SELECT DISTINCT c.type_line, c.color_identity_json, p.rarity, ci.language, ci.condition_code\n       FROM collection_data_collection_items ci\n       JOIN card_data_printings p ON p.id = ci.printing_id\n       JOIN card_data_cards c ON c.id = p.card_id\n       WHERE (?1 IS NULL OR ci.collection_id = ?1)\n         AND (ci.quantity_nonfoil > 0 OR ci.quantity_foil > 0)",
+    "tables": [
+      "card_data_cards",
+      "card_data_printings",
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "load_collection_rows",
+    "line": 2889,
+    "call": "prepare",
+    "sql": "SELECT\n         ci.id,\n         p.id,\n         c.name,\n         p.set_code,\n         p.collector_number,\n         p.image_normal_url,\n         c.type_line,\n         c.color_identity_json,\n         c.cmc,\n         p.rarity,\n         ci.quantity_nonfoil,\n         ci.quantity_foil,\n         ci.updated_at,\n         ci.condition_code,\n         ci.language,\n         l.name,\n         ci.notes,\n         ci.purchase_price,\n         ci.acquired_at\n       FROM collection_data_collection_items ci\n       JOIN card_data_printings p ON p.id = ci.printing_id\n       JOIN card_data_cards c ON c.id = p.card_id\n       LEFT JOIN collection_data_locations l ON l.id = ci.location_id\n       WHERE ci.collection_id = ?1\n         AND (ci.quantity_nonfoil > 0 OR ci.quantity_foil > 0)\n       ORDER BY c.name COLLATE NOCASE",
+    "tables": [
+      "card_data_cards",
+      "card_data_printings",
+      "collection_data_collection_items",
+      "collection_data_locations"
+    ]
+  },
+  {
+    "function": "list_profiles",
+    "line": 3009,
+    "call": "prepare",
+    "sql": "SELECT id, display_name, created_at\n       FROM collection_data_profiles\n       ORDER BY display_name COLLATE NOCASE",
+    "tables": [
+      "collection_data_profiles"
+    ]
+  },
+  {
+    "function": "create_profile",
+    "line": 3043,
+    "call": "query_row",
+    "sql": "SELECT id, display_name, created_at\n       FROM collection_data_profiles\n       WHERE lower(display_name) = lower(?1)\n       LIMIT 1",
+    "tables": [
+      "collection_data_profiles"
+    ]
+  },
+  {
+    "function": "create_profile",
+    "line": 3067,
+    "call": "execute",
+    "sql": "INSERT INTO collection_data_profiles\n         (id, display_name, owner_account_id, is_local_profile, created_at, updated_at)\n       VALUES (?1, ?2, 'local-account', 1, ?3, ?3)",
+    "tables": [
+      "collection_data_profiles"
+    ]
+  },
+  {
+    "function": "create_profile",
+    "line": 3075,
+    "call": "execute",
+    "sql": "INSERT INTO collection_data_collections\n         (id, profile_id, name, description, visibility, created_at, updated_at)\n       VALUES (\n         ?1,\n         ?1,\n         CASE\n           WHEN instr(lower(?2), 'collection') > 0 THEN ?2\n           ELSE ?2 || ' Collection'\n         END,\n         NULL,\n         'private',\n         ?3,\n         ?3\n       )",
+    "tables": [
+      "collection_data_collections"
+    ]
+  },
+  {
+    "function": "add_card_to_collection",
+    "line": 3130,
+    "call": "query_row",
+    "sql": "SELECT id, quantity_nonfoil, quantity_foil\n       FROM collection_data_collection_items\n       WHERE collection_id = ?1\n         AND printing_id = ?2\n         AND condition_code = 'NM'\n         AND language = 'en'\n         AND location_id IS NULL\n       LIMIT 1",
+    "tables": [
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "add_card_to_collection",
+    "line": 3155,
+    "call": "execute",
+    "sql": "UPDATE collection_data_collection_items\n         SET quantity_nonfoil = ?1, quantity_foil = ?2, updated_at = ?3\n         WHERE id = ?4",
+    "tables": [
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "add_card_to_collection",
+    "line": 3170,
+    "call": "execute",
+    "sql": "INSERT INTO collection_data_collection_items (\n           id, collection_id, printing_id, quantity_nonfoil, quantity_foil, condition_code, language,\n           purchase_price, acquired_at, location_id, notes, created_at, updated_at\n         )\n         VALUES (?1, ?2, ?3, ?4, ?5, 'NM', 'en', NULL, ?6, NULL, NULL, ?6, ?6)",
+    "tables": [
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "update_card_quantity",
+    "line": 3212,
+    "call": "query_row",
+    "sql": "SELECT id, quantity_nonfoil, quantity_foil\n       FROM collection_data_collection_items\n       WHERE collection_id = ?1\n         AND printing_id = ?2\n         AND condition_code = 'NM'\n         AND language = 'en'\n         AND location_id IS NULL\n       LIMIT 1",
+    "tables": [
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "update_card_quantity",
+    "line": 3239,
+    "call": "execute",
+    "sql": "DELETE FROM collection_data_collection_items WHERE id = ?1",
+    "tables": [
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "update_card_quantity",
+    "line": 3246,
+    "call": "execute",
+    "sql": "UPDATE collection_data_collection_items\n           SET quantity_nonfoil = ?1, quantity_foil = ?2, updated_at = ?3\n           WHERE id = ?4",
+    "tables": [
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "remove_card_from_collection",
+    "line": 3270,
+    "call": "execute",
+    "sql": "DELETE FROM collection_data_collection_items WHERE collection_id = ?1 AND printing_id = ?2",
+    "tables": [
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "remove_cards_from_collection",
+    "line": 3291,
+    "call": "prepare",
+    "sql": "DELETE FROM collection_data_collection_items\n         WHERE collection_id = ?1\n           AND printing_id = ?2",
+    "tables": [
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "import_collection_rows",
+    "line": 3382,
+    "call": "query_row",
+    "sql": "SELECT id\n               FROM collection_data_locations\n               WHERE collection_id = ?1\n                 AND LOWER(name) = LOWER(?2)\n               LIMIT 1",
+    "tables": [
+      "collection_data_locations"
+    ]
+  },
+  {
+    "function": "import_collection_rows",
+    "line": 3398,
+    "call": "execute",
+    "sql": "INSERT INTO collection_data_locations (id, collection_id, name, kind, created_at, updated_at)\n               VALUES (?1, ?2, ?3, 'general', ?4, ?4)",
+    "tables": [
+      "collection_data_locations"
+    ]
+  },
+  {
+    "function": "import_collection_rows",
+    "line": 3410,
+    "call": "query_row",
+    "sql": "SELECT id, quantity_nonfoil, quantity_foil\n           FROM collection_data_collection_items\n           WHERE collection_id = ?1\n             AND printing_id = ?2\n             AND condition_code = ?3\n             AND language = ?4\n             AND IFNULL(location_id, '') = IFNULL(?5, '')\n           LIMIT 1",
+    "tables": [
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "import_collection_rows",
+    "line": 3434,
+    "call": "execute",
+    "sql": "UPDATE collection_data_collection_items\n           SET quantity_nonfoil = ?1,\n               quantity_foil = ?2,\n               purchase_price = COALESCE(?3, purchase_price),\n               acquired_at = COALESCE(?4, acquired_at),\n               notes = COALESCE(?5, notes),\n               updated_at = ?6\n           WHERE id = ?7",
+    "tables": [
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "import_collection_rows",
+    "line": 3457,
+    "call": "execute",
+    "sql": "INSERT INTO collection_data_collection_items (\n             id, collection_id, printing_id, quantity_nonfoil, quantity_foil, condition_code, language,\n             purchase_price, acquired_at, location_id, notes, created_at, updated_at\n           )\n           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
+    "tables": [
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "bulk_update_tags",
+    "line": 3557,
+    "call": "query_row",
+    "sql": "SELECT id, quantity_nonfoil, quantity_foil\n           FROM collection_data_collection_items\n           WHERE collection_id = ?1\n             AND printing_id = ?2\n             AND condition_code = 'NM'\n             AND language = 'en'\n             AND location_id IS NULL\n           LIMIT 1",
+    "tables": [
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "update_owned_card_metadata",
+    "line": 3605,
+    "call": "query_row",
+    "sql": "SELECT id\n       FROM collection_data_collection_items\n       WHERE collection_id = ?1\n         AND printing_id = ?2\n       ORDER BY updated_at DESC\n       LIMIT 1",
+    "tables": [
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "update_owned_card_metadata",
+    "line": 3627,
+    "call": "query_row",
+    "sql": "SELECT id FROM collection_data_locations WHERE collection_id = ?1 AND lower(name) = lower(?2) LIMIT 1",
+    "tables": [
+      "collection_data_locations"
+    ]
+  },
+  {
+    "function": "update_owned_card_metadata",
+    "line": 3640,
+    "call": "execute",
+    "sql": "INSERT INTO collection_data_locations (id, collection_id, name, kind, created_at, updated_at)\n             VALUES (?1, ?2, ?3, 'box', ?4, ?4)",
+    "tables": [
+      "collection_data_locations"
+    ]
+  },
+  {
+    "function": "update_owned_card_metadata",
+    "line": 3675,
+    "call": "execute",
+    "sql": "UPDATE collection_data_collection_items\n       SET condition_code = ?1,\n           language = ?2,\n           location_id = ?3,\n           notes = ?4,\n           purchase_price = ?5,\n           acquired_at = ?6,\n           updated_at = ?7\n       WHERE id = ?8",
+    "tables": [
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "set_owned_card_state",
+    "line": 3716,
+    "call": "execute",
+    "sql": "DELETE FROM collection_data_collection_items WHERE collection_id = ?1 AND printing_id = ?2",
+    "tables": [
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "set_owned_card_state",
+    "line": 3739,
+    "call": "query_row",
+    "sql": "SELECT id\n       FROM collection_data_collection_items\n       WHERE collection_id = ?1\n         AND printing_id = ?2\n       ORDER BY updated_at DESC\n       LIMIT 1",
+    "tables": [
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "set_owned_card_state",
+    "line": 3757,
+    "call": "query_row",
+    "sql": "SELECT id FROM collection_data_locations WHERE collection_id = ?1 AND lower(name) = lower(?2) LIMIT 1",
+    "tables": [
+      "collection_data_locations"
+    ]
+  },
+  {
+    "function": "set_owned_card_state",
+    "line": 3770,
+    "call": "execute",
+    "sql": "INSERT INTO collection_data_locations (id, collection_id, name, kind, created_at, updated_at)\n             VALUES (?1, ?2, ?3, 'box', ?4, ?4)",
+    "tables": [
+      "collection_data_locations"
+    ]
+  },
+  {
+    "function": "set_owned_card_state",
+    "line": 3811,
+    "call": "execute",
+    "sql": "UPDATE collection_data_collection_items\n         SET quantity_nonfoil = ?1,\n             quantity_foil = ?2,\n             condition_code = ?3,\n             language = ?4,\n             location_id = ?5,\n             notes = ?6,\n             purchase_price = ?7,\n             acquired_at = ?8,\n             updated_at = ?9\n         WHERE id = ?10",
+    "tables": [
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "set_owned_card_state",
+    "line": 3841,
+    "call": "execute",
+    "sql": "INSERT INTO collection_data_collection_items (\n           id, collection_id, printing_id, quantity_nonfoil, quantity_foil, condition_code, language,\n           purchase_price, acquired_at, location_id, notes, created_at, updated_at\n         )\n         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
+    "tables": [
+      "collection_data_collection_items"
+    ]
+  },
+  {
+    "function": "get_catalog_price_records",
+    "line": 3906,
+    "call": "prepare",
+    "sql": "SELECT p.id, c.name, p.set_code, p.collector_number, p.image_normal_url, cp.tcg_market, cp.captured_at\n       FROM card_data_card_prices cp\n       JOIN card_data_printings p ON p.id = cp.printing_id\n       JOIN card_data_cards c ON c.id = p.card_id\n       WHERE p.id = ?1\n         AND cp.sync_version = ?2\n         AND cp.tcg_market IS NOT NULL\n       ORDER BY cp.captured_at DESC\n       LIMIT 1",
+    "tables": [
+      "card_data_card_prices",
+      "card_data_cards",
+      "card_data_printings"
+    ]
+  },
+  {
+    "function": "apply_catalog_snapshot",
+    "line": 3971,
+    "call": "execute",
+    "sql": "DELETE FROM card_data_card_prices\n     WHERE sync_version = ?1",
+    "tables": [
+      "card_data_card_prices"
+    ]
+  },
+  {
+    "function": "apply_catalog_patch",
+    "line": 4059,
+    "call": "execute",
+    "sql": "DELETE FROM card_data_card_prices\n     WHERE sync_version = ?1",
+    "tables": [
+      "card_data_card_prices"
+    ]
+  },
+  {
+    "function": "apply_catalog_patch",
+    "line": 4065,
+    "call": "execute",
+    "sql": "INSERT INTO card_data_card_prices (\n       printing_id, condition_id, finish_id,\n       tcg_low, tcg_market, tcg_high,\n       ck_sell, ck_buylist, ck_buylist_quantity_cap,\n       sync_version, captured_ymd, captured_at, created_at\n     )\n     SELECT\n       printing_id, condition_id, finish_id,\n       tcg_low, tcg_market, tcg_high,\n       ck_sell, ck_buylist, ck_buylist_quantity_cap,\n       ?1, ?2, ?3, ?3\n     FROM card_data_card_prices\n     WHERE sync_version = ?4",
+    "tables": [
+      "card_data_card_prices"
+    ]
+  },
+  {
+    "function": "apply_catalog_patch",
+    "line": 4084,
+    "call": "execute",
+    "sql": "DELETE FROM card_data_card_prices\n       WHERE sync_version = ?1\n         AND printing_id = ?2",
+    "tables": [
+      "card_data_card_prices"
+    ]
+  },
+  {
+    "function": "reset_catalog_sync_state_for_test",
+    "line": 4146,
+    "call": "execute",
+    "sql": "DELETE FROM card_data_card_prices",
+    "tables": [
+      "card_data_card_prices"
+    ]
+  },
+  {
+    "function": "reset_catalog_sync_state_for_test",
+    "line": 4151,
+    "call": "execute",
+    "sql": "DELETE FROM system_data_sync_client_sync_state\n     WHERE client_id = ?1\n       AND dataset_name = ?2",
+    "tables": [
+      "system_data_sync_client_sync_state"
+    ]
+  },
+  {
+    "function": "reset_catalog_sync_state_for_test",
+    "line": 4158,
+    "call": "execute",
+    "sql": "DELETE FROM system_data_sync_patch_apply_history\n     WHERE client_id = ?1\n       AND dataset_name = ?2",
+    "tables": [
+      "system_data_sync_patch_apply_history"
+    ]
+  },
+  {
+    "function": "reset_catalog_sync_state_for_test",
+    "line": 4165,
+    "call": "execute",
+    "sql": "DELETE FROM system_data_sync_patches WHERE dataset_name = ?1",
+    "tables": [
+      "system_data_sync_patches"
+    ]
+  },
+  {
+    "function": "reset_catalog_sync_state_for_test",
+    "line": 4170,
+    "call": "execute",
+    "sql": "DELETE FROM system_data_sync_dataset_versions WHERE dataset_name = ?1",
+    "tables": [
+      "system_data_sync_dataset_versions"
+    ]
+  },
+  {
+    "function": "optimize_catalog_storage",
+    "line": 4190,
+    "call": "execute",
+    "sql": "PRAGMA optimize;\n      ANALYZE card_data_card_prices;\n      ANALYZE card_data_printings;\n      ANALYZE card_data_cards;\n      REINDEX idx_card_data_card_prices_printing_time;\n      REINDEX idx_card_data_card_prices_sync_version;\n      REINDEX idx_card_data_printings_set_collector;\n      VACUUM;\n      ",
+    "tables": []
+  },
+  {
+    "function": "sync_ck_prices_into_card_data",
+    "line": 4350,
+    "call": "query_row",
+    "sql": "SELECT 1 FROM card_data_printings WHERE id = ?1 LIMIT 1",
+    "tables": [
+      "card_data_printings"
+    ]
+  },
+  {
+    "function": "sync_all_sources_now",
+    "line": 4491,
+    "call": "query_row",
+    "sql": "SELECT 1 FROM card_data_printings WHERE id = ?1 LIMIT 1",
+    "tables": [
+      "card_data_printings"
+    ]
+  }
+]

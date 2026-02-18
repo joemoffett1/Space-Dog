@@ -32,6 +32,12 @@ Deliver a fast, reliable Windows desktop app that can:
 - token chips
 - row density controls
 - text-row mini art thumbnails
+10. Drafted v2 database blueprint for hosted-service transition (`collection_data`, `card_data`, `system_data_sync`) with operator policy (`ctag` vs `otag`) and migration strategy in `DATABASE_SCHEMA.md`.
+11. Implemented database-layer v2 transition migration (`0004_schema_groups_v2.sql`) with:
+- grouped v2 tables
+- compact unified pricing table + code dictionaries
+- legacy backfill
+- legacy -> v2 compatibility triggers
 
 ## UI Mockup Alignment Audit (New)
 Target reference: the space-themed mockup style and interaction model discussed in chat.
@@ -135,15 +141,18 @@ Status key:
 
 ## Phase 3: Pricing Source Architecture
 1. Define price provider registry (Scryfall, CK buylist, future providers).
-2. Add per-view source selection:
+2. Implement compact pricing dictionaries (`provider`, `channel`, `currency`, `condition`, `finish`) with numeric IDs.
+3. Consolidate market + buylist snapshots into one `card_prices` fact model (nullable buylist fields).
+4. Use compact daily snapshot keying (`captured_ymd`, `build_version`) for patch-friendly transport.
+5. Add per-view source selection:
 - Collection value source
 - Market list source
 - Reports source
-3. Add provider health states:
+6. Add provider health states:
 - available
 - stale
 - disabled
-4. Add provider-specific refresh cadence controls.
+7. Add provider-specific refresh cadence controls.
 
 ## Phase 4: Performance and Stability
 1. Profile and reduce tab-switch lag with large collections.
@@ -167,10 +176,10 @@ Status key:
 4. Add local sync endpoint selector (`mock` vs `http://127.0.0.1:8787`).
 5. Add local endpoint health-check button.
 6. Add sync audit table UI from diagnostics/history.
-7. Harden image fallback and log failures to diagnostics.
-8. Add transaction batching for bulk metadata operations.
-9. Add regression checklist script for import/edit/undo/sync paths.
-10. Add docs for daily local sync runbook (Task Scheduler + scripts).
+7. Migrate Rust query paths from legacy tables to v2 grouped tables (`collection_data_*`, `card_data_*`, `system_data_sync_*`) now that `0004` is in place.
+8. Implement search operator migration (`tag:` alias -> `ctag:`, add `otag:` pipeline placeholder).
+9. Add transaction batching for bulk metadata operations.
+10. Add regression checklist script for import/edit/undo/sync paths.
 
 ## Deferred Until After Prototype Quality Gate
 1. Cloudflare deployment setup and R2 lifecycle hardening.

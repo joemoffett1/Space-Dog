@@ -610,6 +610,12 @@ th {
   gap: 0.52rem;
 }
 
+.price-source-stack {
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 0.34rem;
+}
+
 .quick-filter-control {
   display: flex;
   flex-direction: column;
@@ -985,6 +991,51 @@ th {
   min-height: 2.2rem;
 }
 
+.display-dropdown {
+  min-width: 8.5rem;
+}
+
+.display-popout {
+  position: relative;
+  min-height: auto;
+}
+
+.display-popout .filter-dropdown-body {
+  display: none;
+}
+
+.display-popout[open] .filter-dropdown-body {
+  display: flex;
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  min-width: 14rem;
+  max-height: 260px;
+  z-index: 80;
+  border: 1px solid rgba(130, 156, 255, 0.25);
+  border-radius: 10px;
+  background: rgba(7, 14, 41, 0.97);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.32);
+}
+
+.list-control-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin: 0.15rem 0 0.32rem;
+}
+
+.list-control-row .muted.small {
+  margin: 0;
+}
+
+.list-control-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .filter-dropdown summary {
   cursor: pointer;
   list-style: none;
@@ -1059,6 +1110,23 @@ th {
   text-transform: uppercase;
   color: var(--ink-soft);
   font-weight: 700;
+}
+
+.head-sort-button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+
+.head-sort-button:hover {
+  color: #dce9ff;
 }
 
 .collection-row {
@@ -1408,6 +1476,139 @@ th {
   grid-template-columns: minmax(0, 1fr) 250px;
   gap: 0.74rem;
   min-height: 0;
+}
+
+.import-wizard-modal {
+  width: min(1280px, 97vw);
+  max-height: min(90vh, 980px);
+}
+
+.import-wizard-content {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.72rem;
+  padding-right: 0.2rem;
+}
+
+.import-wizard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.72rem;
+}
+
+.import-wizard-card {
+  border: 1px solid rgba(125, 154, 255, 0.34);
+  border-radius: 12px;
+  background: rgba(9, 18, 57, 0.72);
+  padding: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.import-toggle {
+  border-radius: 10px;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid rgba(125, 154, 255, 0.34);
+  background: rgba(12, 22, 66, 0.68);
+}
+
+.import-mapping-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.import-mapping-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+}
+
+.import-preview-table-wrap {
+  border: 1px solid rgba(118, 147, 247, 0.3);
+  border-radius: 10px;
+  overflow: auto;
+  max-height: 220px;
+}
+
+.import-preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.79rem;
+}
+
+.import-preview-table th,
+.import-preview-table td {
+  border-bottom: 1px solid rgba(101, 127, 214, 0.3);
+  padding: 0.34rem 0.42rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.import-preview-table th {
+  background: rgba(14, 28, 81, 0.78);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.import-wizard-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: linear-gradient(180deg, rgba(8, 15, 46, 0.5), rgba(8, 15, 46, 0.95));
+  padding: 0.55rem 0.2rem 0.1rem;
+  margin-top: 0.35rem;
+  justify-content: space-between;
+  gap: 0.55rem;
+}
+
+.import-report-summary {
+  gap: 0.45rem;
+}
+
+.import-progress-pill {
+  margin-top: 0.42rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid rgba(120, 192, 255, 0.46);
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  background: rgba(10, 23, 71, 0.72);
+  color: #c8deff;
+  font-size: 0.76rem;
+}
+
+.import-progress-icon {
+  width: 14px;
+  height: 14px;
+  opacity: 0.9;
+}
+
+.import-spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 2px solid rgba(112, 177, 255, 0.32);
+  border-top-color: rgba(255, 173, 95, 0.95);
+  animation: import-spin 0.95s linear infinite;
+}
+
+@keyframes import-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 1100px) {
+  .import-wizard-grid,
+  .import-mapping-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .submenu-main {

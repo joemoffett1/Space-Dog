@@ -3,7 +3,7 @@
 This README is currently the primary remote update surface for project progress.
 It includes a quick summary, blockers, test focus, and a full changelog mirror.
 
-Last updated: 2026-02-09
+Last updated: 2026-02-11
 Current stage: `1.x.x-alpha`
 
 ## Asset Attribution
@@ -15,23 +15,23 @@ Current stage: `1.x.x-alpha`
 - release notes
 
 ## Features Added (This Run)
-- Added free Tabler icon pack integration under `magiccollection-desktop/public/ui-icons`.
-- Added Archidekt-style popup submenus in Collection for `Add Card` and `Versions`.
-- Added in-app `Credits And Licenses` panel in Settings.
+- Added full legacy SQL cleanup migration path with v2-only startup migrations:
+  - active: `0004_schema_groups_v2.sql`, `0005_drop_legacy_tables.sql`
+  - removed from runtime path: `0001_initial.sql`, `0002_catalog_sync.sql`, `0003_filter_tokens.sql`
+- Added DB cleanup migration execution in app startup and verified legacy table removal.
 
 ## Features Updated (This Run)
-- Updated typography to `Space Grotesk` + `Orbitron` and refreshed modal/button visuals.
-- Expanded attribution docs with concrete path-level entries for icon/font sources and terms.
+- Updated schema docs (`SQL_MIG.md`, `DATABASE_SCHEMA.md`, `ARCHITECTURE.md`, `BASELINE.md`) to reflect grouped v2 table model.
+- Updated migration/runbook wording to remove stale legacy-table instructions.
 
 ## Blockers (Logged And Bypassed)
 - Group F blocker: cloud account server and mobile-store design are still pending.
 - Cloudflare deployment is intentionally deferred until desktop prototype sign-off.
 
 ## Things You Need To Test
-- Open Collection -> `Add Card` and test search + +N/+F actions from popup.
-- Open Versions popup from image/text row and test +/- actions there.
-- Validate Settings -> `Credits And Licenses` content and source/terms text.
-- Confirm new icon assets and font look good at your target desktop resolution.
+- Launch app from a clean start and verify collection load still works.
+- Run import/edit/remove flows to confirm no regression after legacy table removal.
+- Trigger sync refresh and confirm status/price data still populate correctly.
 
 ## Group Status
 1. Group A: `completed`

@@ -21,16 +21,13 @@ Created: 2026-02-09
   - browser fallback mode (local storage) for non-Tauri dev.
 
 ## Data foundation
-- Initial SQLite migration at `src-tauri/migrations/0001_initial.sql`.
-- Includes starter schema for:
-  - profiles
-  - cards / printings
-  - locations
-  - owned_items
-  - tags / owned_item_tags
-  - transactions
-  - price_snapshots
-  - buylist_offers
+- Active SQLite migrations:
+  - `src-tauri/migrations/0004_schema_groups_v2.sql`
+  - `src-tauri/migrations/0005_drop_legacy_tables.sql`
+- Runtime schema now uses grouped v2 tables:
+  - `collection_data_*`
+  - `card_data_*`
+  - `system_data_sync_*`
 
 ## Backend Commands
 - Implemented in `src-tauri/src/lib.rs`:

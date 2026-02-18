@@ -8,6 +8,202 @@ Versioning policy for alpha:
 - Increment `patch` (`x` in `1.0.x-alpha`) for updates/fixes to existing features.
 - Use engineering discretion on feature vs update.
 
+## [1.20.22-alpha] - 2026-02-18
+### Changed
+- Updated `docs/FRONTEND_BACKEND_SQL_MAP.md` Part 3 to organize SQL inventory by call location:
+  - startup/app bootstrap
+  - collection/profile flows
+  - collection search/sort/pricing view calls
+  - market page calls
+  - global sync/catalog pipeline calls
+- Refreshed frontend/backend command mapping and SQL call catalog consistency for current runtime command paths.
+
+## [1.20.20-alpha] - 2026-02-15
+### Changed
+- Updated unified sync pipeline to run in explicit 3-step order:
+  - `TCGTracking` pricing sync first
+  - `Card Kingdom` pricing sync second
+  - `Scryfall` full `default_cards` metadata/oracle upsert third
+- Removed Scryfall price writing from unified sync (Scryfall is now metadata/oracle only in this flow).
+- Added cooperative throttling during long sync loops to reduce sustained CPU spikes:
+  - short periodic sleeps every N rows/sets while processing global updates
+- Added CK sync safety guard for missing printings in global runs:
+  - CK rows without an existing `card_data_printings.id` are skipped instead of causing FK failures.
+- Updated frontend sync status text and error fallback so it no longer reports Scryfall pricing refresh failures.
+
+## [1.20.21-alpha] - 2026-02-15
+### Changed
+- Added migration tracking table `_app_migrations` and switched startup migration execution to apply-once semantics.
+- Added `0008_compact_price_rows.sql`:
+  - migrates `card_data_card_prices` from provider/channel row model to compact per-card rows
+  - adds compact price columns (`tcg_low`, `tcg_market`, `tcg_high`, `ck_sell`, `ck_buylist`, `ck_buylist_quantity_cap`)
+  - adds `condition_group_id` on `card_data_condition_codes` for cross-provider condition mapping
+- Refactored backend price reads/writes to use compact row model:
+  - sync, trend reads, catalog snapshot/patch apply, and market snapshot ingestion now target compact columns
+  - collection source trend lookup now maps source keys to compact columns.
+- Updated `DATABASE_SCHEMA.md` and `SQL_MIG.md` for the compact pricing model and new migration order/state.
+
+## [1.20.19-alpha] - 2026-02-15
+### Changed
+- Expanded unified sync scope to global-card server behavior:
+  - Scryfall now syncs from `bulk-data -> default_cards` (all cards), not only cards currently in a collection.
+  - TCGTracking now scans all available sets from `/tcgapi/v1/1/sets` and writes matched TCG channels globally.
+  - CK sync remains global via CK pricelist and is executed as part of the same run.
+- Scryfall oracle/card updates now explicitly return unchanged vs changed semantics suitable for global diff-style processing.
+
+## [1.20.18-alpha] - 2026-02-15
+### Added
+- Added unified backend sync command `sync_all_sources_now` (Tauri) to run source ingestion in one action:
+  - Scryfall collection metadata/oracle refresh against local printings
+  - TCGTracking TCGplayer channel refresh (market/low/high where available)
+  - Card Kingdom sync reuse for buylist/sell channels
+- Added sync source/version bookkeeping writes for runtime sync runs in `system_data_sync_*` tables.
+
+### Changed
+- Updated app refresh flow to use unified backend sync command instead of mock patch-only flow.
+- Refresh button is now always clickable (still acts as cancel while a sync is running).
+- Refresh completion summary now reports source-level counts from the unified sync result.
+
+## [1.20.15-alpha] - 2026-02-11
+### Changed
+- Completed full legacy migration cleanup:
+  - removed `magiccollection-desktop/src-tauri/migrations/0001_initial.sql`
+  - removed `magiccollection-desktop/src-tauri/migrations/0002_catalog_sync.sql`
+  - removed `magiccollection-desktop/src-tauri/migrations/0003_filter_tokens.sql`
+- Trimmed `0004_schema_groups_v2.sql` to v2-only schema/seed content (legacy backfill and compatibility trigger sections removed).
+- Kept and wired `0005_drop_legacy_tables.sql` as cleanup safety migration for existing legacy DBs.
+- Updated startup migration order to v2-only (`0004`, then `0005`).
+
+### Docs
+- Updated `SQL_MIG.md`, `DATABASE_SCHEMA.md`, `ARCHITECTURE.md`, `magiccollection-desktop/BASELINE.md`, and root `README.md` to reflect the v2-only SQL state.
+
+## [1.20.16-alpha] - 2026-02-11
+### Added
+- Added a collection import wizard for delimited files in Collection view:
+  - file picker supports `.csv`, `.tsv`, and `.txt`
+  - delimiter selection (`auto`, `comma`, `tab`, `semicolon`, `pipe`, `custom`)
+  - column mapping UI for required and optional fields
+  - preview table before import
+  - tolerant row handling (invalid/unsupported rows are skipped)
+- Added generic delimited importer module:
+  - `magiccollection-desktop/src/lib/importers/delimited.ts`
+  - supports mapping-driven conversion into `CollectionImportRow[]`
+  - supports optional "use first tag as location when location column is empty"
+
+### Changed
+- Replaced strict `Import Archidekt CSV` action with `Import Collection File` wizard flow in `CollectionPage`.
+- Updated import row model to carry optional metadata fields:
+  - `locationName`, `conditionCode`, `language`, `notes`, `purchasePrice`, `dateAdded`, `imageUrl`
+- Updated Rust `import_collection_rows` handling to persist mapped metadata on import rows (including location resolution).
+
+## [1.20.17-alpha] - 2026-02-11
+### Changed
+- Import wizard enrichment now resolves identity in both directions:
+  - fills missing `scryfallId` from `setCode + collectorNumber`
+  - fills missing `setCode + collectorNumber` from `scryfallId`
+- Added backend upsert guard so placeholder import values do not overwrite known printing identity fields:
+  - keeps existing set when incoming set is `unknown`
+  - keeps existing collector number when incoming value is `0`
+- Collection UI now hides system-derived tags (`owned`, `foil`, `playset`) from visible tag chips and user tag filters.
+- Filter token generation excludes system tags from `tag:` suggestions and guidance text now points to user tags.
+- Added bulk delete action for selected rows with confirmation:
+  - `Remove Selected Rows` button below the visible-row count
+  - backend bulk remove command (`remove_cards_from_collection`) for fast multi-row deletion.
+
+## [1.20.14-alpha] - 2026-02-11
+### Added
+- Added cleanup migration: `magiccollection-desktop/src-tauri/migrations/0005_drop_legacy_tables.sql`.
+  - Drops legacy compatibility triggers from `0004`.
+  - Drops legacy tables (`profiles`, `cards`, `printings`, `locations`, `owned_items`, `tags`, `owned_item_tags`, `transactions`, `price_snapshots`, `buylist_offers`, `catalog_cards`, `catalog_sync_state`, `catalog_patch_history`, `filter_tokens`).
+
+### Changed
+- Wired `0005_drop_legacy_tables.sql` into DB init in `magiccollection-desktop/src-tauri/src/lib.rs`.
+- Updated migration documentation (`SQL_MIG.md`, `DATABASE_SCHEMA.md`) to reflect full cleanup stage.
+
+## [1.20.13-alpha] - 2026-02-10
+### Changed
+- Migrated Rust runtime SQL in `magiccollection-desktop/src-tauri/src/lib.rs` from legacy tables to grouped v2 tables:
+  - collection flows now use `collection_data_*`
+  - card metadata/pricing flows now use `card_data_*`
+  - catalog sync state/history now use `system_data_sync_*`
+- Reworked catalog sync command SQL to store and read market snapshot versions from `card_data_card_prices` instead of `catalog_cards`.
+- Replaced SQL-backed `filter_tokens` usage with dynamic token generation from current collection/card data (no runtime dependency on legacy `filter_tokens` table).
+- Updated `SQL_MIG.md` execution status and table migration state to reflect runtime completion.
+
+## [1.20.12-alpha] - 2026-02-10
+### Added
+- Added `magiccollection-desktop/src-tauri/migrations/0004_schema_groups_v2.sql` implementing the full SQL transition foundation:
+  - new grouped tables across `collection_data_*`, `card_data_*`, `system_data_sync_*`
+  - compact unified pricing model in `card_data_card_prices`
+  - compact dictionary tables (`provider/channel/currency/condition/finish`)
+  - `sync_version` + `captured_ymd` fields for patch-build based ingest
+  - one-time backfill from legacy tables
+  - legacy -> v2 compatibility triggers so current app write paths mirror into v2 tables
+- Added transition runbook: `SQL_SCHEMA_TRANSITION_PLAN.md`.
+
+### Changed
+- Wired migration `0004_schema_groups_v2.sql` into Rust DB initialization in `magiccollection-desktop/src-tauri/src/lib.rs`.
+- Updated `DATABASE_SCHEMA.md` source-of-truth migration list to include `0004`.
+- Updated `NEXT_STEPS.md` to reflect that DB-layer v2 migration is implemented and app-layer query migration is next.
+
+## [1.20.11-alpha] - 2026-02-10
+### Changed
+- Updated target pricing schema in `DATABASE_SCHEMA.md` to use a compact unified pricing model:
+  - replaced separate target `card_data.prices` + `card_data.buylist_offers` with one target `card_data.card_prices` fact table
+  - added dictionary/code tables for compact storage and transport:
+    - `card_data.price_providers`
+    - `card_data.price_channels`
+    - `card_data.currency_codes`
+    - `card_data.condition_codes`
+    - `card_data.finish_codes`
+- Added compact patch payload guidance for daily phone-friendly sync records using coded dimensions and `captured_ymd` + `build_version`.
+- Updated `NEXT_STEPS.md` Phase 3 to align pricing roadmap with the unified compact pricing model.
+
+## [1.20.10-alpha] - 2026-02-10
+### Changed
+- Expanded `DATABASE_SCHEMA.md` with a forward production blueprint using requested logical schema groups:
+  - `collection_data`
+  - `card_data`
+  - `system_data_sync`
+- Added a concrete auth/profile/collection separation model with offline-local support and password-hash storage guidance.
+- Added lightweight-collection/heavy-catalog FK strategy and minimal cross-schema FK policy.
+- Added explicit search operator policy for custom tags vs external tags:
+  - user tags: `ctag:`
+  - external tags: `otag:`
+  - Scryfall operator precedence when conflicts exist.
+- Added migration strategy for SQLite now and service DB later, including prefixed table naming guidance (`collection_data_*`, `card_data_*`, `system_data_sync_*`).
+- Added generated Scryfall field inventory artifact:
+  - `docs/scryfall_default_cards_field_inventory_2026-02-10.json`
+  - sourced from local `default_cards.json` to ground schema design in real payload coverage.
+
+## [1.20.9-alpha] - 2026-02-10
+### Changed
+- Reworked `DATABASE_SCHEMA.md` into a human-friendly format with:
+- quick-start summary
+- domain overview table
+- Mermaid system map + ER map + flow sequence diagrams
+- schema-group based nested collapsible table reference
+- cross-group foreign key map + physical-vs-logical schema clarification
+- Mermaid schema group map and preview/render guidance for VS Code
+- Added workspace markdown preview styling for sharper in-IDE docs:
+- `.vscode/settings.json` markdown preview defaults
+- `docs/markdown-preview.css` for typography, table, code block, and details styling
+- Reworked `ARCHITECTURE.md` into a modern reader-focused format with:
+- executive summary and runtime layer matrix
+- Mermaid architecture and flow diagrams
+- clearer scope boundaries (current vs deferred)
+- direct cross-linking to `DATABASE_SCHEMA.md` for deep data details
+
+## [1.20.8-alpha] - 2026-02-10
+### Added
+- Added root `DATABASE_SCHEMA.md` with a full SQL reference:
+- physical DB location and startup/migration lifecycle
+- complete table and column catalog with field meaning
+- key constraints/indexes for each table
+- relationship map (logical ERD)
+- runtime flow map for profile, CSV import, metadata hydration, pricing, and catalog sync
+- near-term schema extension recommendations (sets normalization, transaction ledger activation, migration tracking)
+
 ## [1.20.7-alpha] - 2026-02-10
 ### Changed
 - Added Scryfall metadata hydration pipeline for owned cards with missing metadata (`type_line`, color identity, CMC, rarity, image URLs):

@@ -1,9 +1,11 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, KeyboardEvent, UIEvent } from 'react'
+import { startTransition, useEffect, useMemo, useRef, useState } from 'react'
+import type { KeyboardEvent, UIEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { getFilterTokens, syncFilterTokens } from '../lib/backend'
+import { getCollectionPriceTrendsBySource, getFilterTokens, syncFilterTokens } from '../lib/backend'
+import { ImportWizardModal } from '../components/ImportWizardModal'
 import type {
   AddCardInput,
+  CollectionImportRow,
   FilterToken,
   OwnedCard,
   PriceDirection,
@@ -13,8 +15,41 @@ import type {
 type CollectionViewMode = 'text' | 'image'
 type FinishFilter = 'all' | 'any-foil' | 'nonfoil-only'
 type RowDensity = 'comfortable' | 'balanced' | 'dense'
-type SortMode = 'qty-desc' | 'name-asc' | 'price-desc' | 'set-asc' | 'updated-desc'
-type TextColumnId = 'set' | 'number' | 'tags' | 'price' | 'trend'
+type SortColumn =
+  | 'card'
+  | 'set'
+  | 'number'
+  | 'type'
+  | 'color'
+  | 'tags'
+  | 'location'
+  | 'condition'
+  | 'language'
+  | 'dateAdded'
+  | 'purchasePrice'
+  | 'price'
+  | 'trend'
+  | 'nonfoil'
+  | 'foil'
+  | 'total'
+  | 'versions'
+  | 'updated'
+type SortDirection = 'asc' | 'desc'
+type PriceByMode = 'unit' | 'position'
+type TextColumnId =
+  | 'set'
+  | 'number'
+  | 'type'
+  | 'color'
+  | 'tags'
+  | 'location'
+  | 'condition'
+  | 'language'
+  | 'dateAdded'
+  | 'purchasePrice'
+  | 'price'
+  | 'trend'
+  | 'updated'
 type TextColumnState = Record<TextColumnId, boolean>
 type CollectionModalMode = 'versions' | 'add'
 
@@ -26,6 +61,7 @@ interface CollectionPageProps {
   onDecrement: (cardId: string, foil: boolean) => Promise<void>
   onAddPrinting: (input: Omit<AddCardInput, 'profileId'>) => Promise<void>
   onRemove: (cardId: string) => Promise<void>
+  onRemoveSelected: (cardIds: string[]) => Promise<void>
   onTagCard: (cardId: string, tag: string) => Promise<void>
   onUpdateMetadata: (
     cardId: string,
@@ -39,11 +75,7 @@ interface CollectionPageProps {
   onUndoLastAction: () => Promise<void>
   canUndo: boolean
   undoLabel?: string
-  onImportArchidektCsv: (file: File) => Promise<{
-    rowsImported: number
-    copiesImported: number
-    rowsSkipped: number
-  }>
+  onImportCollectionRows: (rows: CollectionImportRow[]) => Promise<void>
   onHydrateTypeMetadata?: () => Promise<void>
   isSyncing?: boolean
 }
@@ -103,12 +135,21 @@ const CONDITION_OPTIONS = ['NM', 'LP', 'MP', 'HP', 'DMG']
 const LANGUAGE_OPTIONS = ['en', 'jp', 'de', 'fr', 'it', 'es', 'pt', 'ko', 'ru', 'zhs', 'zht']
 const COLOR_SYMBOLS = ['W', 'U', 'B', 'R', 'G']
 const ADD_RESULT_LIMIT = 80
+const SYSTEM_TAGS = new Set(['owned', 'foil', 'playset'])
 const TEXT_COLUMNS: Array<{ id: TextColumnId; label: string }> = [
   { id: 'set', label: 'Set' },
   { id: 'number', label: '#' },
+  { id: 'type', label: 'Type' },
+  { id: 'color', label: 'Color' },
   { id: 'tags', label: 'Tags' },
+  { id: 'location', label: 'Location' },
+  { id: 'condition', label: 'Condition' },
+  { id: 'language', label: 'Language' },
+  { id: 'dateAdded', label: 'Date Added' },
+  { id: 'purchasePrice', label: 'Purchase' },
   { id: 'price', label: 'Price' },
   { id: 'trend', label: 'Trend' },
+  { id: 'updated', label: 'Updated' },
 ]
 const DENSITY_ROW_HEIGHT: Record<RowDensity, number> = {
   comfortable: 54,
@@ -121,10 +162,13 @@ const DENSITY_IMAGE_MIN_WIDTH: Record<RowDensity, number> = {
   dense: 158,
 }
 const PRICE_SOURCE_OPTIONS = [
-  { id: 'scryfall-market', label: 'Scryfall Market' },
-  { id: 'ck-buylist', label: 'CK Buylist (soon)' },
-  { id: 'multi-source', label: 'Multi-source (soon)' },
+  { id: 'tcg-low', label: 'TCGplayer Low', providerId: 3, channelId: 6 },
+  { id: 'tcg-market', label: 'TCGplayer Market', providerId: 3, channelId: 4 },
+  { id: 'tcg-high', label: 'TCGplayer High', providerId: 3, channelId: 8 },
+  { id: 'ck-sell', label: 'CK Sell', providerId: 2, channelId: 11 },
+  { id: 'ck-buylist', label: 'CK Buylist', providerId: 2, channelId: 10 },
 ] as const
+type PriceSourceId = (typeof PRICE_SOURCE_OPTIONS)[number]['id']
 const SEARCH_FIELD_PREFIXES = [
   'set:',
   'tag:',
@@ -147,12 +191,25 @@ const DEFAULT_TYPE_OPTIONS = [
   'sorcery',
   'tribal',
 ] as const
-const SORT_MODE_LABELS: Record<SortMode, string> = {
-  'qty-desc': 'Quantity',
-  'name-asc': 'Name',
-  'price-desc': 'Price',
-  'set-asc': 'Set',
-  'updated-desc': 'Updated',
+const SORT_COLUMN_LABELS: Record<SortColumn, string> = {
+  card: 'Card',
+  set: 'Set',
+  number: '#',
+  type: 'Type',
+  color: 'Color',
+  tags: 'Tags',
+  location: 'Location',
+  condition: 'Condition',
+  language: 'Language',
+  dateAdded: 'Date Added',
+  purchasePrice: 'Purchase Price',
+  price: 'Price',
+  trend: 'Trend',
+  nonfoil: 'Nonfoil',
+  foil: 'Foil',
+  total: 'Total',
+  versions: 'Versions',
+  updated: 'Updated',
 }
 
 function formatUsd(value: number | null): string {
@@ -182,8 +239,18 @@ function deltaText(value: number | null): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}`
 }
 
+function compareNullableNumber(left: number | null | undefined, right: number | null | undefined): number {
+  const a = typeof left === 'number' && Number.isFinite(left) ? left : Number.NEGATIVE_INFINITY
+  const b = typeof right === 'number' && Number.isFinite(right) ? right : Number.NEGATIVE_INFINITY
+  return a - b
+}
+
 function normalize(value: string): string {
   return value.trim().toLowerCase()
+}
+
+function visibleUserTags(tags: string[]): string[] {
+  return tags.filter((tag) => !SYSTEM_TAGS.has(normalize(tag)))
 }
 
 function colorIdentityLabel(colors: string[] | undefined): string {
@@ -390,14 +457,14 @@ function matchesSearchPlan(card: OwnedCard, plan: ParsedSearchPlan): boolean {
   const typeName = inferPrimaryType(card.typeLine)
   const normalizedTypeLine = normalize(card.typeLine ?? '')
   const colorLabel = colorIdentityLabel(card.colorIdentity)
-  const cardTagsNormalized = card.tags.map((tag) => normalize(tag))
+  const cardTagsNormalized = visibleUserTags(card.tags).map((tag) => normalize(tag))
   const searchable = [
     card.name,
     card.setCode,
     card.collectorNumber,
     typeName,
     colorLabel,
-    ...card.tags,
+    ...visibleUserTags(card.tags),
   ]
     .join(' ')
     .toLowerCase()
@@ -698,6 +765,7 @@ export function CollectionPage({
   onDecrement,
   onAddPrinting,
   onRemove,
+  onRemoveSelected,
   onTagCard,
   onUpdateMetadata,
   onBulkUpdateMetadata,
@@ -705,12 +773,10 @@ export function CollectionPage({
   onUndoLastAction,
   canUndo,
   undoLabel = '',
-  onImportArchidektCsv,
+  onImportCollectionRows,
   onHydrateTypeMetadata,
   isSyncing = false,
 }: CollectionPageProps) {
-  const [importMessage, setImportMessage] = useState('')
-  const [importError, setImportError] = useState('')
   const [viewMode, setViewMode] = useState<CollectionViewMode>('text')
   const [rowDensity, setRowDensity] = useState<RowDensity>('balanced')
   const [compactMode, setCompactMode] = useState(false)
@@ -723,10 +789,22 @@ export function CollectionPage({
   const [isSuggestionLoading, setIsSuggestionLoading] = useState(false)
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
   const [finishFilter, setFinishFilter] = useState<FinishFilter>('all')
-  const [sortMode, setSortMode] = useState<SortMode>('qty-desc')
-  const [priceSource, setPriceSource] = useState<(typeof PRICE_SOURCE_OPTIONS)[number]['id']>(
-    'scryfall-market',
-  )
+  const [sortColumn, setSortColumn] = useState<SortColumn>('total')
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
+  const [priceSource, setPriceSource] = useState<PriceSourceId>('tcg-market')
+  const [priceByMode, setPriceByMode] = useState<PriceByMode>('unit')
+  const [sourceTrendById, setSourceTrendById] = useState<
+    Record<
+      string,
+      {
+        currentPrice: number | null
+        previousPrice: number | null
+        priceDelta: number | null
+        priceDirection: PriceDirection
+        lastPriceAt: string | null
+      }
+    >
+  >({})
   const [quickSetFilter, setQuickSetFilter] = useState('')
   const [quickTypeFilter, setQuickTypeFilter] = useState('')
   const [quickColorFilter, setQuickColorFilter] = useState('')
@@ -739,9 +817,17 @@ export function CollectionPage({
   const [textColumnState, setTextColumnState] = useState<TextColumnState>({
     set: true,
     number: true,
+    type: false,
+    color: false,
     tags: true,
+    location: true,
+    condition: false,
+    language: false,
+    dateAdded: false,
+    purchasePrice: false,
     price: true,
     trend: true,
+    updated: false,
   })
   const [listScrollTop, setListScrollTop] = useState(0)
   const [imageLimit, setImageLimit] = useState(IMAGE_PAGE_SIZE)
@@ -770,8 +856,8 @@ export function CollectionPage({
   const [editDateAdded, setEditDateAdded] = useState('')
   const [didRequestTypeHydration, setDidRequestTypeHydration] = useState(false)
   const [isHydratingTypeMetadata, setIsHydratingTypeMetadata] = useState(false)
+  const [isImportWizardOpen, setIsImportWizardOpen] = useState(false)
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const searchTokenInputRefs = useRef<Array<HTMLInputElement | null>>([])
@@ -781,11 +867,42 @@ export function CollectionPage({
   const totalCards = cards.reduce((sum, card) => sum + card.quantity + card.foilQuantity, 0)
   const totalFoils = cards.reduce((sum, card) => sum + card.foilQuantity, 0)
 
-  const pricedCards = cards.filter((card) => card.currentPrice !== null)
-  const estimatedMarket = pricedCards.reduce(
-    (sum, card) => sum + (card.currentPrice ?? 0) * (card.quantity + card.foilQuantity),
-    0,
-  )
+  function trendForSource(card: OwnedCard) {
+    const bySource = sourceTrendById[card.scryfallId]
+    if (bySource) {
+      return bySource
+    }
+    return {
+      currentPrice: card.currentPrice,
+      previousPrice: card.previousPrice,
+      priceDelta: card.priceDelta,
+      priceDirection: card.priceDirection,
+      lastPriceAt: card.lastPriceAt,
+    }
+  }
+
+  function unitPriceForCard(card: OwnedCard): number | null {
+    return trendForSource(card).currentPrice
+  }
+
+  function displayPriceForCard(card: OwnedCard): number | null {
+    const unit = unitPriceForCard(card)
+    if (unit === null) {
+      return null
+    }
+    if (priceByMode === 'position') {
+      return unit * (card.quantity + card.foilQuantity)
+    }
+    return unit
+  }
+
+  const estimatedMarket = cards.reduce((sum, card) => {
+    const unit = unitPriceForCard(card)
+    if (unit === null) {
+      return sum
+    }
+    return sum + unit * (card.quantity + card.foilQuantity)
+  }, 0)
 
   const versionCountsByName = useMemo(() => {
     const map = new Map<string, Set<string>>()
@@ -844,7 +961,7 @@ export function CollectionPage({
   )
   const tagOptions = useMemo(
     () =>
-      [...new Set(cards.flatMap((card) => card.tags.map((tag) => tag.trim()).filter(Boolean)))].sort(
+      [...new Set(cards.flatMap((card) => visibleUserTags(card.tags).map((tag) => tag.trim()).filter(Boolean)))].sort(
         (a, b) => a.localeCompare(b),
       ),
     [cards],
@@ -1023,6 +1140,55 @@ export function CollectionPage({
   }, [profileId])
 
   useEffect(() => {
+    let cancelled = false
+
+    async function loadSourcePrices() {
+      if (!cards.length) {
+        setSourceTrendById({})
+        return
+      }
+      try {
+        const trends = await getCollectionPriceTrendsBySource({
+          profileId,
+          sourceId: priceSource,
+        })
+        if (cancelled) {
+          return
+        }
+        const next: Record<
+          string,
+          {
+            currentPrice: number | null
+            previousPrice: number | null
+            priceDelta: number | null
+            priceDirection: PriceDirection
+            lastPriceAt: string | null
+          }
+        > = {}
+        for (const trend of trends) {
+          next[trend.scryfallId] = {
+            currentPrice: trend.currentPrice,
+            previousPrice: trend.previousPrice,
+            priceDelta: trend.priceDelta,
+            priceDirection: trend.priceDirection,
+            lastPriceAt: trend.lastPriceAt,
+          }
+        }
+        setSourceTrendById(next)
+      } catch {
+        if (!cancelled) {
+          setSourceTrendById({})
+        }
+      }
+    }
+
+    void loadSourcePrices()
+    return () => {
+      cancelled = true
+    }
+  }, [profileId, priceSource, cards.length])
+
+  useEffect(() => {
     if (parsedSearchPlan.typeTerms.length <= 0) {
       return
     }
@@ -1076,7 +1242,7 @@ export function CollectionPage({
       }
       if (
         tagFilters.size > 0 &&
-        !card.tags.some((tag) => tagFilters.has(tag.trim()))
+        !visibleUserTags(card.tags).some((tag) => tagFilters.has(tag.trim()))
       ) {
         return false
       }
@@ -1110,39 +1276,103 @@ export function CollectionPage({
   ])
 
   const sortedFilteredCards = useMemo(() => {
+    const typeById = new Map<string, string>()
+    const colorById = new Map<string, string>()
+    const tagLineById = new Map<string, string>()
+    const locationById = new Map<string, string>()
+    const conditionById = new Map<string, string>()
+    const languageById = new Map<string, string>()
+    const dateAddedMsById = new Map<string, number>()
+    const updatedMsById = new Map<string, number>()
+    const displayPriceById = new Map<string, number | null>()
+    const trendDeltaById = new Map<string, number | null>()
+
+    for (const card of filteredCards) {
+      const bySource = sourceTrendById[card.scryfallId] ?? {
+        currentPrice: card.currentPrice,
+        previousPrice: card.previousPrice,
+        priceDelta: card.priceDelta,
+        priceDirection: card.priceDirection,
+        lastPriceAt: card.lastPriceAt,
+      }
+      const unit = bySource.currentPrice
+      const displayPrice =
+        unit === null
+          ? null
+          : priceByMode === 'position'
+            ? unit * (card.quantity + card.foilQuantity)
+            : unit
+
+      typeById.set(card.scryfallId, inferPrimaryType(card.typeLine))
+      colorById.set(card.scryfallId, colorIdentityLabel(card.colorIdentity))
+      tagLineById.set(card.scryfallId, visibleUserTags(card.tags).join('|'))
+      locationById.set(card.scryfallId, card.locationName ?? '')
+      conditionById.set(card.scryfallId, card.conditionCode ?? '')
+      languageById.set(card.scryfallId, card.language ?? '')
+      dateAddedMsById.set(card.scryfallId, Date.parse(card.dateAdded ?? '') || 0)
+      updatedMsById.set(card.scryfallId, Date.parse(card.updatedAt) || 0)
+      displayPriceById.set(card.scryfallId, displayPrice)
+      trendDeltaById.set(card.scryfallId, bySource.priceDelta)
+    }
+
     const next = [...filteredCards]
     next.sort((a, b) => {
-      if (sortMode === 'name-asc') {
-        return a.name.localeCompare(b.name)
+      const aId = a.scryfallId
+      const bId = b.scryfallId
+      let delta = 0
+      if (sortColumn === 'card') {
+        delta = a.name.localeCompare(b.name)
+      } else if (sortColumn === 'set') {
+        delta = a.setCode.localeCompare(b.setCode)
+      } else if (sortColumn === 'number') {
+        delta = a.collectorNumber.localeCompare(b.collectorNumber, undefined, { numeric: true })
+      } else if (sortColumn === 'type') {
+        delta = (typeById.get(aId) ?? '').localeCompare(typeById.get(bId) ?? '')
+      } else if (sortColumn === 'color') {
+        delta = (colorById.get(aId) ?? '').localeCompare(colorById.get(bId) ?? '')
+      } else if (sortColumn === 'tags') {
+        delta = (tagLineById.get(aId) ?? '').localeCompare(tagLineById.get(bId) ?? '')
+      } else if (sortColumn === 'location') {
+        delta = (locationById.get(aId) ?? '').localeCompare(locationById.get(bId) ?? '')
+      } else if (sortColumn === 'condition') {
+        delta = (conditionById.get(aId) ?? '').localeCompare(conditionById.get(bId) ?? '')
+      } else if (sortColumn === 'language') {
+        delta = (languageById.get(aId) ?? '').localeCompare(languageById.get(bId) ?? '')
+      } else if (sortColumn === 'dateAdded') {
+        delta = (dateAddedMsById.get(aId) ?? 0) - (dateAddedMsById.get(bId) ?? 0)
+      } else if (sortColumn === 'purchasePrice') {
+        delta = compareNullableNumber(a.purchasePrice, b.purchasePrice)
+      } else if (sortColumn === 'price') {
+        delta = compareNullableNumber(displayPriceById.get(aId) ?? null, displayPriceById.get(bId) ?? null)
+      } else if (sortColumn === 'trend') {
+        delta = compareNullableNumber(trendDeltaById.get(aId) ?? null, trendDeltaById.get(bId) ?? null)
+      } else if (sortColumn === 'nonfoil') {
+        delta = a.quantity - b.quantity
+      } else if (sortColumn === 'foil') {
+        delta = a.foilQuantity - b.foilQuantity
+      } else if (sortColumn === 'versions') {
+        delta =
+          (versionCountsByName.get(normalize(a.name)) ?? 1) -
+          (versionCountsByName.get(normalize(b.name)) ?? 1)
+      } else if (sortColumn === 'updated') {
+        delta = (updatedMsById.get(aId) ?? 0) - (updatedMsById.get(bId) ?? 0)
+      } else {
+        delta = a.quantity + a.foilQuantity - (b.quantity + b.foilQuantity)
       }
-      if (sortMode === 'price-desc') {
-        return (b.currentPrice ?? -1) - (a.currentPrice ?? -1)
+
+      if (delta === 0) {
+        delta = a.name.localeCompare(b.name)
       }
-      if (sortMode === 'set-asc') {
-        const setDelta = a.setCode.localeCompare(b.setCode)
-        if (setDelta !== 0) {
-          return setDelta
-        }
-        return a.collectorNumber.localeCompare(b.collectorNumber, undefined, { numeric: true })
-      }
-      if (sortMode === 'updated-desc') {
-        return (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0)
-      }
-      const qtyDelta =
-        b.quantity + b.foilQuantity - (a.quantity + a.foilQuantity)
-      if (qtyDelta !== 0) {
-        return qtyDelta
-      }
-      return a.name.localeCompare(b.name)
+      return sortDirection === 'asc' ? delta : -delta
     })
     return next
-  }, [filteredCards, sortMode])
+  }, [filteredCards, sortColumn, sortDirection, priceByMode, sourceTrendById, versionCountsByName])
 
   useEffect(() => {
     setListScrollTop(0)
     listRef.current?.scrollTo({ top: 0 })
     setImageLimit(IMAGE_PAGE_SIZE)
-  }, [viewMode, compactMode, rowDensity, searchQuery, sortedFilteredCards.length, sortMode])
+  }, [viewMode, compactMode, rowDensity, searchQuery, sortedFilteredCards.length, sortColumn, sortDirection])
 
   useEffect(() => {
     setSelectedCardIds((previous) => {
@@ -1246,14 +1476,38 @@ export function CollectionPage({
     if (textColumnState.number) {
       columns.push('80px')
     }
+    if (textColumnState.type) {
+      columns.push('minmax(128px, 1.2fr)')
+    }
+    if (textColumnState.color) {
+      columns.push('72px')
+    }
     if (textColumnState.tags) {
       columns.push('minmax(220px, 2fr)')
+    }
+    if (textColumnState.location) {
+      columns.push('minmax(140px, 1.2fr)')
+    }
+    if (textColumnState.condition) {
+      columns.push('88px')
+    }
+    if (textColumnState.language) {
+      columns.push('88px')
+    }
+    if (textColumnState.dateAdded) {
+      columns.push('112px')
+    }
+    if (textColumnState.purchasePrice) {
+      columns.push('96px')
     }
     if (textColumnState.price) {
       columns.push('88px')
     }
     if (textColumnState.trend) {
       columns.push('108px')
+    }
+    if (textColumnState.updated) {
+      columns.push('112px')
     }
     columns.push('72px', '72px', '72px', 'minmax(248px, 1.8fr)')
     return columns.join(' ')
@@ -1416,27 +1670,13 @@ export function CollectionPage({
     }
   }
 
-  function handleChooseCsvFile() {
-    fileInputRef.current?.click()
-  }
-
-  async function handleFileSelected(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (!file) {
-      return
-    }
-
-    setImportError('')
-    setImportMessage('')
-    try {
-      const result = await onImportArchidektCsv(file)
-      setImportMessage(
-        `Imported ${result.rowsImported} rows (${result.copiesImported} copies). Skipped ${result.rowsSkipped}.`,
-      )
-    } catch (error) {
-      setImportError(error instanceof Error ? error.message : 'Failed to import Archidekt CSV.')
-    }
+  async function handleImportFromWizard(payload: {
+    rows: CollectionImportRow[]
+    rowsImported: number
+    copiesImported: number
+    rowsSkipped: number
+  }) {
+    await onImportCollectionRows(payload.rows)
   }
 
   function handleVirtualScroll(event: UIEvent<HTMLDivElement>) {
@@ -1472,6 +1712,39 @@ export function CollectionPage({
     setSearchTerms([])
     setSearchDraft('')
     setActiveSearchBoxIndex(-1)
+  }
+
+  function defaultSortDirectionFor(column: SortColumn): SortDirection {
+    if (
+      column === 'card' ||
+      column === 'set' ||
+      column === 'number' ||
+      column === 'type' ||
+      column === 'color' ||
+      column === 'tags' ||
+      column === 'location' ||
+      column === 'condition' ||
+      column === 'language'
+    ) {
+      return 'asc'
+    }
+    return 'desc'
+  }
+
+  function toggleSortColumn(column: SortColumn) {
+    if (sortColumn === column) {
+      setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setSortColumn(column)
+    setSortDirection(defaultSortDirectionFor(column))
+  }
+
+  function sortIndicator(column: SortColumn): string {
+    if (sortColumn !== column) {
+      return ''
+    }
+    return sortDirection === 'asc' ? ' ^' : ' v'
   }
 
   function toggleTextColumn(id: TextColumnId) {
@@ -1630,6 +1903,31 @@ export function CollectionPage({
     setSelectedCardIds(new Set())
   }
 
+  async function handleRemoveSelectedRows() {
+    const selected = [...selectedCardIds]
+    if (!selected.length) {
+      return
+    }
+    const undoHint =
+      selected.length <= 400
+        ? 'This can be undone with Undo.'
+        : 'Undo is disabled for very large bulk deletes.'
+    const confirmed = window.confirm(
+      `Remove ${selected.length} selected rows from this collection? ${undoHint}`,
+    )
+    if (!confirmed) {
+      return
+    }
+
+    setMetadataError('')
+    try {
+      await onRemoveSelected(selected)
+      setSelectedCardIds(new Set())
+    } catch (error) {
+      setMetadataError(error instanceof Error ? error.message : 'Failed to remove selected rows.')
+    }
+  }
+
   async function applyBulkMetadata() {
     const selected = [...selectedCardIds]
     if (!selected.length) {
@@ -1732,8 +2030,13 @@ export function CollectionPage({
             <button className="button paw-pill" onClick={onOpenMarket} type="button">
               Open Market
             </button>
-            <button className="button subtle paw-pill" onClick={handleChooseCsvFile} type="button" disabled={isSyncing}>
-              Import Archidekt CSV
+            <button
+              className="button subtle paw-pill"
+              onClick={() => setIsImportWizardOpen(true)}
+              type="button"
+              disabled={isSyncing}
+            >
+              Import Collection File
             </button>
             <button className="button subtle paw-pill" type="button" disabled title="Export is being finalized">
               Export (soon)
@@ -1750,7 +2053,6 @@ export function CollectionPage({
               Undo
             </button>
           </div>
-          <input ref={fileInputRef} type="file" accept=".csv,text/csv" onChange={handleFileSelected} style={{ display: 'none' }} />
         </div>
       </div>
 
@@ -1900,7 +2202,7 @@ export function CollectionPage({
             ) : null}
           </div>
           <p className="muted small search-help-line">
-            {'Tip: use set:mh3 tag:owned c:ur mv>=3 for fast narrowing.'}
+            {'Tip: use set:mh3 tag:not_for_sale c:ur mv>=3 for fast narrowing.'}
           </p>
           {parsedSearchPlan.typeTerms.length > 0 && missingTypeMetadataCount > 0 ? (
             <p className="muted small search-help-line">
@@ -1919,7 +2221,10 @@ export function CollectionPage({
             <select
               className="tag-select"
               value={quickSetFilter}
-              onChange={(event) => setQuickSetFilter(event.target.value)}
+              onChange={(event) => {
+                const next = event.target.value
+                startTransition(() => setQuickSetFilter(next))
+              }}
             >
               <option value="">All Sets</option>
               {setOptions.map((value) => (
@@ -1934,7 +2239,10 @@ export function CollectionPage({
             <select
               className="tag-select"
               value={quickTypeFilter}
-              onChange={(event) => setQuickTypeFilter(event.target.value)}
+              onChange={(event) => {
+                const next = event.target.value
+                startTransition(() => setQuickTypeFilter(next))
+              }}
             >
               <option value="">All Types</option>
               {typeOptions.map((value) => (
@@ -1949,7 +2257,10 @@ export function CollectionPage({
             <select
               className="tag-select"
               value={quickColorFilter}
-              onChange={(event) => setQuickColorFilter(event.target.value)}
+              onChange={(event) => {
+                const next = event.target.value
+                startTransition(() => setQuickColorFilter(next))
+              }}
             >
               <option value="">All Colors</option>
               {colorOptions.map((value) => (
@@ -1963,28 +2274,82 @@ export function CollectionPage({
         <div className="sort-source-row">
           <label className="quick-filter-control">
             <span className="muted small">Sort</span>
-            <select className="tag-select" value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}>
-              <option value="qty-desc">Quantity (High to Low)</option>
-              <option value="name-asc">Name (A to Z)</option>
-              <option value="price-desc">Price (High to Low)</option>
-              <option value="set-asc">Set / Number</option>
-              <option value="updated-desc">Recently Updated</option>
+            <select
+              className="tag-select"
+              value={sortColumn}
+              onChange={(event) => {
+                const nextColumn = event.target.value as SortColumn
+                startTransition(() => {
+                  setSortColumn(nextColumn)
+                  setSortDirection(defaultSortDirectionFor(nextColumn))
+                })
+              }}
+            >
+              <option value="total">Total Qty</option>
+              <option value="card">Card Name</option>
+              <option value="price">Price</option>
+              <option value="set">Set</option>
+              <option value="number">Collector Number</option>
+              <option value="type">Type</option>
+              <option value="color">Color Identity</option>
+              <option value="location">Location</option>
+              <option value="condition">Condition</option>
+              <option value="language">Language</option>
+              <option value="dateAdded">Date Added</option>
+              <option value="purchasePrice">Purchase Price</option>
+              <option value="trend">Trend Delta</option>
+              <option value="nonfoil">Nonfoil Qty</option>
+              <option value="foil">Foil Qty</option>
+              <option value="updated">Recently Updated</option>
             </select>
           </label>
           <label className="quick-filter-control">
-            <span className="muted small">Price Source</span>
+            <span className="muted small">Direction</span>
             <select
               className="tag-select"
-              value={priceSource}
-              onChange={(event) => setPriceSource(event.target.value as (typeof PRICE_SOURCE_OPTIONS)[number]['id'])}
+              value={sortDirection}
+              onChange={(event) => {
+                const next = event.target.value as SortDirection
+                startTransition(() => setSortDirection(next))
+              }}
             >
-              {PRICE_SOURCE_OPTIONS.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
+              <option value="desc">High to Low</option>
+              <option value="asc">Low to High</option>
             </select>
           </label>
+          <div className="price-source-stack">
+            <label className="quick-filter-control">
+              <span className="muted small">Price By</span>
+              <select
+                className="tag-select"
+                value={priceByMode}
+                onChange={(event) => {
+                  const next = event.target.value as PriceByMode
+                  startTransition(() => setPriceByMode(next))
+                }}
+              >
+                <option value="unit">Unit Price</option>
+                <option value="position">Total Position</option>
+              </select>
+            </label>
+            <label className="quick-filter-control">
+              <span className="muted small">Price Source</span>
+              <select
+                className="tag-select"
+                value={priceSource}
+                onChange={(event) => {
+                  const next = event.target.value as PriceSourceId
+                  startTransition(() => setPriceSource(next))
+                }}
+              >
+                {PRICE_SOURCE_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
         </div>
       </div>
 
@@ -2068,23 +2433,6 @@ export function CollectionPage({
               ))}
             </div>
           </details>
-          {viewMode !== 'image' ? (
-            <details className="filter-dropdown">
-              <summary>Columns</summary>
-              <div className="filter-dropdown-body">
-                {TEXT_COLUMNS.map((column) => (
-                  <label key={column.id} className="filter-option">
-                    <input
-                      type="checkbox"
-                      checked={textColumnState[column.id]}
-                      onChange={() => toggleTextColumn(column.id)}
-                    />
-                    <span>{column.label}</span>
-                  </label>
-                ))}
-              </div>
-            </details>
-          ) : null}
         </div>
       ) : null}
 
@@ -2131,9 +2479,13 @@ export function CollectionPage({
         </button>
       </div>
 
-      {importMessage ? <p className="muted">{importMessage}</p> : null}
-      {importError ? <p className="error-line">{importError}</p> : null}
       {metadataError ? <p className="error-line">{metadataError}</p> : null}
+      <ImportWizardModal
+        isOpen={isImportWizardOpen}
+        isBusy={isSyncing}
+        onClose={() => setIsImportWizardOpen(false)}
+        onImport={handleImportFromWizard}
+      />
 
       <div className="stat-strip">
         <article className="stat-chip"><h3>Unique Cards</h3><strong>{uniqueCards}</strong></article>
@@ -2149,7 +2501,36 @@ export function CollectionPage({
         </div>
       ) : (
         <>
-          <p className="muted small">Showing {sortedFilteredCards.length} of {cards.length} printings.</p>
+          <div className="list-control-row">
+            <p className="muted small">Showing {sortedFilteredCards.length} of {cards.length} printings.</p>
+            <div className="list-control-row-actions">
+              {viewMode !== 'image' ? (
+                <details className="filter-dropdown display-dropdown display-popout">
+                  <summary>Display</summary>
+                  <div className="filter-dropdown-body">
+                    {TEXT_COLUMNS.map((column) => (
+                      <label key={column.id} className="filter-option">
+                        <input
+                          type="checkbox"
+                          checked={textColumnState[column.id]}
+                          onChange={() => toggleTextColumn(column.id)}
+                        />
+                        <span>{column.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </details>
+              ) : null}
+              <button
+                className="button tiny danger"
+                type="button"
+                onClick={() => void handleRemoveSelectedRows()}
+                disabled={selectedCardIds.size === 0 || isSyncing}
+              >
+                Remove Selected Rows
+              </button>
+            </div>
+          </div>
           {viewMode === 'image' ? (
             <>
               <div className={`collection-image-grid density-${rowDensity}`} style={imageGridStyle}>
@@ -2201,12 +2582,14 @@ export function CollectionPage({
                         </p>
 
                         <div className="price-line">
-                          <span className="price-current">{formatUsd(card.currentPrice)}</span>
-                          <span className={`trend trend-${card.priceDirection} trend-pill`}>{trendGlyph(card.priceDirection)} {deltaText(card.priceDelta)}</span>
+                          <span className="price-current">{formatUsd(displayPriceForCard(card))}</span>
+                          <span className={`trend trend-${trendForSource(card).priceDirection} trend-pill`}>
+                            {trendGlyph(trendForSource(card).priceDirection)} {deltaText(trendForSource(card).priceDelta)}
+                          </span>
                         </div>
 
                         <div className="tag-line">
-                          {card.tags.slice(0, 5).map((tag) => (
+                          {visibleUserTags(card.tags).slice(0, 5).map((tag) => (
                             <button
                               key={`${card.scryfallId}-${tag}`}
                               type="button"
@@ -2232,7 +2615,7 @@ export function CollectionPage({
                             onClick={() => toggleFoilMode(card.scryfallId)}
                             title="Toggle foil mode for + and -"
                           >
-                            ✓ Foil Mode
+                            ? Foil Mode
                           </button>
                         </div>
                       </div>
@@ -2255,18 +2638,93 @@ export function CollectionPage({
                 className={`collection-head-row ${compactMode ? 'compact' : ''} density-${rowDensity}`}
                 style={{ gridTemplateColumns: listGridTemplate }}
               >
-                <span>Card</span>
+                <button type="button" className="head-sort-button" onClick={() => toggleSortColumn('card')}>
+                  Card{sortIndicator('card')}
+                </button>
                 {!compactMode ? (
                   <>
-                    {textColumnState.set ? <span>Set</span> : null}
-                    {textColumnState.number ? <span>#</span> : null}
-                    {textColumnState.tags ? <span>Tags</span> : null}
-                    {textColumnState.price ? <span>Price</span> : null}
-                    {textColumnState.trend ? <span>Trend</span> : null}
+                    {textColumnState.set ? (
+                      <button type="button" className="head-sort-button" onClick={() => toggleSortColumn('set')}>
+                        Set{sortIndicator('set')}
+                      </button>
+                    ) : null}
+                    {textColumnState.number ? (
+                      <button type="button" className="head-sort-button" onClick={() => toggleSortColumn('number')}>
+                        #{sortIndicator('number')}
+                      </button>
+                    ) : null}
+                    {textColumnState.type ? (
+                      <button type="button" className="head-sort-button" onClick={() => toggleSortColumn('type')}>
+                        Type{sortIndicator('type')}
+                      </button>
+                    ) : null}
+                    {textColumnState.color ? (
+                      <button type="button" className="head-sort-button" onClick={() => toggleSortColumn('color')}>
+                        Color{sortIndicator('color')}
+                      </button>
+                    ) : null}
+                    {textColumnState.tags ? (
+                      <button type="button" className="head-sort-button" onClick={() => toggleSortColumn('tags')}>
+                        Tags{sortIndicator('tags')}
+                      </button>
+                    ) : null}
+                    {textColumnState.location ? (
+                      <button type="button" className="head-sort-button" onClick={() => toggleSortColumn('location')}>
+                        Location{sortIndicator('location')}
+                      </button>
+                    ) : null}
+                    {textColumnState.condition ? (
+                      <button type="button" className="head-sort-button" onClick={() => toggleSortColumn('condition')}>
+                        Condition{sortIndicator('condition')}
+                      </button>
+                    ) : null}
+                    {textColumnState.language ? (
+                      <button type="button" className="head-sort-button" onClick={() => toggleSortColumn('language')}>
+                        Language{sortIndicator('language')}
+                      </button>
+                    ) : null}
+                    {textColumnState.dateAdded ? (
+                      <button type="button" className="head-sort-button" onClick={() => toggleSortColumn('dateAdded')}>
+                        Date Added{sortIndicator('dateAdded')}
+                      </button>
+                    ) : null}
+                    {textColumnState.purchasePrice ? (
+                      <button type="button" className="head-sort-button" onClick={() => toggleSortColumn('purchasePrice')}>
+                        Purchase{sortIndicator('purchasePrice')}
+                      </button>
+                    ) : null}
+                    {textColumnState.price ? (
+                      <button type="button" className="head-sort-button" onClick={() => toggleSortColumn('price')}>
+                        Price{sortIndicator('price')}
+                      </button>
+                    ) : null}
+                    {textColumnState.trend ? (
+                      <button type="button" className="head-sort-button" onClick={() => toggleSortColumn('trend')}>
+                        Trend{sortIndicator('trend')}
+                      </button>
+                    ) : null}
+                    {textColumnState.updated ? (
+                      <button type="button" className="head-sort-button" onClick={() => toggleSortColumn('updated')}>
+                        Updated{sortIndicator('updated')}
+                      </button>
+                    ) : null}
                   </>
                 ) : null}
-                {compactMode ? <span>Versions</span> : null}
-                <span>Nonfoil</span><span>Foil</span><span>Total</span><span>Actions</span>
+                {compactMode ? (
+                  <button type="button" className="head-sort-button" onClick={() => toggleSortColumn('versions')}>
+                    Versions{sortIndicator('versions')}
+                  </button>
+                ) : null}
+                <button type="button" className="head-sort-button" onClick={() => toggleSortColumn('nonfoil')}>
+                  Nonfoil{sortIndicator('nonfoil')}
+                </button>
+                <button type="button" className="head-sort-button" onClick={() => toggleSortColumn('foil')}>
+                  Foil{sortIndicator('foil')}
+                </button>
+                <button type="button" className="head-sort-button" onClick={() => toggleSortColumn('total')}>
+                  Total{sortIndicator('total')}
+                </button>
+                <span>Actions</span>
               </div>
               <div ref={listRef} className="virtual-list" onScroll={handleVirtualScroll} style={{ height: `${VIRTUAL_HEIGHT}px` }}>
                 <div style={{ height: `${topPad}px` }} />
@@ -2299,17 +2757,27 @@ export function CollectionPage({
                         <>
                           {textColumnState.set ? <span>{card.setCode.toUpperCase()}</span> : null}
                           {textColumnState.number ? <span>{card.collectorNumber}</span> : null}
+                          {textColumnState.type ? <span>{inferPrimaryType(card.typeLine)}</span> : null}
+                          {textColumnState.color ? <span>{colorIdentityLabel(card.colorIdentity)}</span> : null}
                           {textColumnState.tags ? (
                             <div className="tag-line inline">
-                              {card.tags.slice(0, 3).map((tag) => (
+                              {visibleUserTags(card.tags).slice(0, 3).map((tag) => (
                                 <span key={`${card.scryfallId}-${tag}`} className="tag-chip">{tag.toUpperCase()}</span>
                               ))}
                             </div>
                           ) : null}
-                          {textColumnState.price ? <span className="price-pill">{formatUsd(card.currentPrice)}</span> : null}
+                          {textColumnState.location ? <span>{card.locationName?.trim() ? card.locationName : '--'}</span> : null}
+                          {textColumnState.condition ? <span>{card.conditionCode || '--'}</span> : null}
+                          {textColumnState.language ? <span>{(card.language || '--').toUpperCase()}</span> : null}
+                          {textColumnState.dateAdded ? <span>{formatDate(card.dateAdded ?? null)}</span> : null}
+                          {textColumnState.purchasePrice ? <span>{formatUsd(card.purchasePrice ?? null)}</span> : null}
+                          {textColumnState.price ? <span className="price-pill">{formatUsd(displayPriceForCard(card))}</span> : null}
                           {textColumnState.trend ? (
-                            <span className={`trend trend-${card.priceDirection} trend-pill`}>{trendGlyph(card.priceDirection)} {deltaText(card.priceDelta)}</span>
+                            <span className={`trend trend-${trendForSource(card).priceDirection} trend-pill`}>
+                              {trendGlyph(trendForSource(card).priceDirection)} {deltaText(trendForSource(card).priceDelta)}
+                            </span>
                           ) : null}
+                          {textColumnState.updated ? <span>{formatDate(card.updatedAt)}</span> : null}
                         </>
                       ) : null}
                       {compactMode ? <span className="muted">{versions}</span> : null}
@@ -2331,8 +2799,9 @@ export function CollectionPage({
               </div>
               <div className="table-status-strip">
                 <span>{sortedFilteredCards.length} printings visible</span>
-                <span>Sort: {SORT_MODE_LABELS[sortMode]}</span>
+                <span>Sort: {SORT_COLUMN_LABELS[sortColumn]} ({sortDirection})</span>
                 <span>Density: {rowDensity}</span>
+                <span>Price By: {priceByMode === 'position' ? 'Total Position' : 'Unit Price'}</span>
                 <span>Source: {PRICE_SOURCE_OPTIONS.find((entry) => entry.id === priceSource)?.label ?? 'unknown'}</span>
               </div>
             </div>
@@ -2573,3 +3042,7 @@ export function CollectionPage({
     </section>
   )
 }
+
+
+
+

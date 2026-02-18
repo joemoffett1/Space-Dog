@@ -17,18 +17,19 @@ import {
   listProfiles,
   recordMarketSnapshots,
   removeCardFromCollection,
+  removeCardsFromCollection,
   setOwnedCardState,
+  syncAllSourcesNow,
+  syncCkPricesIntoCardData,
   updateOwnedCardMetadata,
   updateCardQuantity,
 } from './lib/backend'
-import { parseArchidektCsv } from './lib/importers/archidekt'
 import { recordPerfMetric } from './lib/perfMetrics'
 import {
   cancelCatalogSyncRun,
   getCatalogPriceRecords,
   getCatalogSyncStatus,
   seedDemoOutdatedCatalogOnce,
-  syncCatalogFromMockPatches,
 } from './lib/catalogSync'
 import {
   clearActiveProfileId,
@@ -55,6 +56,7 @@ import type {
   UpdateOwnedCardMetadataInput,
   OwnedCardMap,
   Profile,
+  CollectionImportRow,
 } from './types'
 
 const MarketPage = lazy(() => import('./pages/MarketPage'))
@@ -71,6 +73,7 @@ type UndoEntry = {
   cards: CardUndoEntry[]
 }
 const MAX_UNDO_ENTRIES = 30
+const AUTO_PRICE_HYDRATE_MAX = 3000
 
 const SCRYFALL_COLLECTION_BATCH = 75
 
@@ -101,6 +104,7 @@ function App() {
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([])
   const refreshAbortRef = useRef<AbortController | null>(null)
   const metadataHydrationRef = useRef(false)
+  const priceHydratedProfilesRef = useRef<Set<string>>(new Set())
 
   const activeProfile = useMemo(
     () => profiles.find((profile) => profile.id === activeProfileId) ?? null,
@@ -200,6 +204,119 @@ function App() {
     setOwnedCards(asCardMap(cards))
   }
 
+  async function hydrateMissingPricesForProfile(
+    profileId: string,
+    baseCards: OwnedCard[],
+    options?: { force?: boolean },
+  ): Promise<void> {
+    const force = !!options?.force
+    if (!force && priceHydratedProfilesRef.current.has(profileId)) {
+      return
+    }
+
+    const missingCards = baseCards.filter((card) => card.currentPrice === null)
+    if (!missingCards.length) {
+      priceHydratedProfilesRef.current.add(profileId)
+      return
+    }
+
+    const hydrateTargets = missingCards.slice(0, AUTO_PRICE_HYDRATE_MAX)
+    const targetIds = hydrateTargets.map((card) => card.scryfallId)
+    let changed = false
+
+    try {
+      const catalogPriceMap = await getCatalogPriceRecords(targetIds)
+      const catalogSnapshots = hydrateTargets
+        .map((card) => {
+          const local = catalogPriceMap[card.scryfallId]
+          if (!local || !Number.isFinite(local.marketPrice)) {
+            return null
+          }
+          return {
+            scryfallId: card.scryfallId,
+            name: card.name,
+            setCode: card.setCode,
+            collectorNumber: card.collectorNumber,
+            imageUrl: card.imageUrl,
+            marketPrice: local.marketPrice,
+          }
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+
+      if (catalogSnapshots.length) {
+        await recordMarketSnapshots(catalogSnapshots)
+        changed = true
+      }
+
+      const matchedIds = new Set(catalogSnapshots.map((item) => item.scryfallId))
+      const fallbackCards = hydrateTargets.filter((card) => !matchedIds.has(card.scryfallId))
+      for (let i = 0; i < fallbackCards.length; i += SCRYFALL_COLLECTION_BATCH) {
+        const batch = fallbackCards.slice(i, i + SCRYFALL_COLLECTION_BATCH)
+        if (!batch.length) {
+          continue
+        }
+        const response = await fetch('https://api.scryfall.com/cards/collection', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            identifiers: batch.map((card) => ({ id: card.scryfallId })),
+          }),
+        })
+        if (!response.ok) {
+          break
+        }
+        const payload = (await response.json()) as {
+          data?: Array<{
+            id: string
+            name?: string
+            set?: string
+            collector_number?: string
+            image_uris?: { normal?: string }
+            card_faces?: Array<{ image_uris?: { normal?: string } }>
+            prices?: { usd?: string | null; usd_foil?: string | null }
+          }>
+        }
+        const snapshots = (payload.data ?? [])
+          .map((entry) => {
+            const marketPrice = entry.prices?.usd ?? entry.prices?.usd_foil ?? null
+            const numeric = marketPrice === null ? null : Number(marketPrice)
+            if (numeric === null || !Number.isFinite(numeric)) {
+              return null
+            }
+            return {
+              scryfallId: entry.id,
+              name: entry.name ?? '',
+              setCode: (entry.set ?? '').toLowerCase(),
+              collectorNumber: entry.collector_number ?? '',
+              imageUrl: entry.image_uris?.normal ?? entry.card_faces?.[0]?.image_uris?.normal,
+              marketPrice: numeric,
+            }
+          })
+          .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+        if (snapshots.length) {
+          await recordMarketSnapshots(snapshots)
+          changed = true
+        }
+      }
+    } catch {
+      // best-effort local price hydration
+    }
+
+    try {
+      const ckResult = await syncCkPricesIntoCardData()
+      if (ckResult.upsertedBuylist > 0 || ckResult.upsertedSell > 0) {
+        changed = true
+      }
+    } catch {
+      // best-effort CK sync
+    }
+
+    if (changed && activeProfileId === profileId) {
+      await restoreCollectionFromBackend(profileId)
+    }
+    priceHydratedProfilesRef.current.add(profileId)
+  }
+
   async function handleHydrateTypeMetadata(): Promise<void> {
     if (!activeProfile || metadataHydrationRef.current) {
       return
@@ -272,6 +389,7 @@ function App() {
               return
             }
             setOwnedCards(asCardMap(cards))
+            void hydrateMissingPricesForProfile(activeProfileId, cards)
           }
         }
       } catch (error) {
@@ -383,6 +501,7 @@ function App() {
       refreshProtectedProfiles(fetchedProfiles)
       setActiveProfileId(profile.id)
       setOwnedCards(asCardMap(cards))
+      void hydrateMissingPricesForProfile(profile.id, cards)
       setUndoStack([])
       setActiveTab('collection')
       return true
@@ -405,6 +524,7 @@ function App() {
       const cards = await getCollection(profileId)
       setActiveProfileId(profileId)
       setOwnedCards(asCardMap(cards))
+      void hydrateMissingPricesForProfile(profileId, cards)
       setUndoStack([])
       setActiveTab('collection')
       return true
@@ -598,6 +718,37 @@ function App() {
     }
   }
 
+  async function handleRemoveCards(cardIds: string[]): Promise<void> {
+    if (!activeProfile || !cardIds.length) {
+      return
+    }
+
+    // Large deletes can be expensive to snapshot; cap undo capture size to keep UI responsive.
+    const shouldCaptureUndo = cardIds.length <= 400
+    const undoCards = shouldCaptureUndo ? captureUndoCards(cardIds) : []
+    setErrorMessage('')
+    setSyncProgressPct(null)
+    setSyncProgressText('')
+    setIsSyncing(true)
+    try {
+      const cards = await removeCardsFromCollection({
+        profileId: activeProfile.id,
+        scryfallIds: cardIds,
+      })
+      setOwnedCards(asCardMap(cards))
+      if (shouldCaptureUndo) {
+        pushUndoEntry(`Remove selected (${cardIds.length})`, undoCards)
+      }
+    } catch (error) {
+      await restoreCollectionFromBackend(activeProfile.id)
+      setErrorMessage(
+        error instanceof Error ? error.message : 'Unable to remove selected cards from collection.',
+      )
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
   async function handleTagCard(cardId: string, tag: string): Promise<void> {
     if (!activeProfile || !tag.trim()) {
       return
@@ -731,11 +882,6 @@ function App() {
       return 'No active profile.'
     }
 
-    const cards = Object.values(ownedCards)
-    if (!cards.length) {
-      return 'No cards to refresh.'
-    }
-
     setErrorMessage('')
     setSyncProgressPct(0)
     setSyncProgressText('Starting')
@@ -749,108 +895,12 @@ function App() {
       }
     }
     try {
+      setSyncProgressPct(12)
+      setSyncProgressText('Syncing TCGTracking + Card Kingdom + Scryfall')
       ensureNotCanceled()
-      setSyncProgressPct(8)
-      setSyncProgressText('Syncing patch version')
-      const catalogSync = await syncCatalogFromMockPatches()
-      ensureNotCanceled()
-      setSyncProgressPct(20)
-      setSyncProgressText('Matching local price cache')
-      const catalogPriceMap = await getCatalogPriceRecords(
-        cards.map((card) => card.scryfallId),
-      )
-      const directSnapshots = cards
-        .map((card) => {
-          const local = catalogPriceMap[card.scryfallId]
-          if (!local || !Number.isFinite(local.marketPrice)) {
-            return null
-          }
-          return {
-            scryfallId: card.scryfallId,
-            name: card.name,
-            setCode: card.setCode,
-            collectorNumber: card.collectorNumber,
-            imageUrl: card.imageUrl,
-            marketPrice: local.marketPrice,
-          }
-        })
-        .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-
-      if (directSnapshots.length) {
-        await recordMarketSnapshots(directSnapshots)
-      }
-      ensureNotCanceled()
-      setSyncProgressPct(30)
-      setSyncProgressText('Applying cached snapshots')
-
-      const matchedIds = new Set(directSnapshots.map((item) => item.scryfallId))
-      const missingCards = cards.filter((card) => !matchedIds.has(card.scryfallId))
-
-      for (let i = 0; i < missingCards.length; i += SCRYFALL_COLLECTION_BATCH) {
-        const batch = missingCards.slice(i, i + SCRYFALL_COLLECTION_BATCH)
-        if (!batch.length) {
-          continue
-        }
-        const response = await fetch('https://api.scryfall.com/cards/collection', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: refreshController.signal,
-          body: JSON.stringify({
-            identifiers: batch.map((card) => ({ id: card.scryfallId })),
-          }),
-        })
-
-        if (!response.ok) {
-          throw new Error(`Scryfall collection sync failed (${response.status}).`)
-        }
-
-        const payload = (await response.json()) as {
-          data?: Array<{
-            id: string
-            name?: string
-            set?: string
-            collector_number?: string
-            image_uris?: { normal?: string }
-            card_faces?: Array<{ image_uris?: { normal?: string } }>
-            prices?: { usd?: string | null; usd_foil?: string | null }
-          }>
-        }
-
-        const snapshots = (payload.data ?? [])
-          .map((entry) => {
-            const marketPrice = entry.prices?.usd ?? entry.prices?.usd_foil ?? null
-            const numeric = marketPrice === null ? null : Number(marketPrice)
-            if (numeric === null || !Number.isFinite(numeric)) {
-              return null
-            }
-            return {
-              scryfallId: entry.id,
-              name: entry.name ?? '',
-              setCode: (entry.set ?? '').toLowerCase(),
-              collectorNumber: entry.collector_number ?? '',
-              imageUrl: entry.image_uris?.normal ?? entry.card_faces?.[0]?.image_uris?.normal,
-              marketPrice: numeric,
-            }
-          })
-          .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-
-        if (snapshots.length) {
-          await recordMarketSnapshots(snapshots)
-        }
-        ensureNotCanceled()
-
-        const batchIndex = Math.floor(i / SCRYFALL_COLLECTION_BATCH) + 1
-        const batchTotal = Math.max(1, Math.ceil(missingCards.length / SCRYFALL_COLLECTION_BATCH))
-        const batchProgress = batchIndex / batchTotal
-        const pct = Math.min(96, Math.round(30 + batchProgress * 65))
-        setSyncProgressPct(pct)
-        setSyncProgressText(`Fetching Scryfall batch ${batchIndex}/${batchTotal}`)
-
-        await new Promise((resolve) => setTimeout(resolve, 80))
-      }
-
-      setSyncProgressPct(98)
-      setSyncProgressText('Finalizing collection trends')
+      const fullSyncResult = await syncAllSourcesNow()
+      setSyncProgressPct(94)
+      setSyncProgressText('Refreshing collection state')
       ensureNotCanceled()
       await restoreCollectionFromBackend(activeProfile.id)
       try {
@@ -865,19 +915,13 @@ function App() {
       }
       setSyncProgressPct(100)
       setSyncProgressText('Complete')
-      return `Catalog sync ${catalogSync.fromVersion ?? 'none'} -> ${
-        catalogSync.toVersion
-      }, patches ${catalogSync.appliedPatches}, matched ${directSnapshots.length}, fallback ${
-        missingCards.length
-      }.`
+      return `Sync ${fullSyncResult.syncVersion}: Scryfall ${fullSyncResult.scryfallUpdated}/${fullSyncResult.scryfallScanned} updated, TCG ${fullSyncResult.tcgPriceUpserts} price upserts, CK sell ${fullSyncResult.ckUpsertedSell}, CK buylist ${fullSyncResult.ckUpsertedBuylist}.`
     } catch (error) {
       if (refreshController.signal.aborted) {
         return 'Sync canceled.'
       }
-      setErrorMessage(
-        error instanceof Error ? error.message : 'Unable to refresh prices from Scryfall.',
-      )
-      return error instanceof Error ? error.message : 'Price refresh failed.'
+      setErrorMessage(error instanceof Error ? error.message : 'Unable to run full data sync.')
+      return error instanceof Error ? error.message : 'Data sync failed.'
     } finally {
       refreshAbortRef.current = null
       window.setTimeout(() => {
@@ -898,19 +942,12 @@ function App() {
     }
   }
 
-  async function handleImportArchidektCsv(file: File): Promise<{
-    rowsImported: number
-    copiesImported: number
-    rowsSkipped: number
-  }> {
+  async function handleImportCollectionRows(rows: CollectionImportRow[]): Promise<void> {
     if (!activeProfile) {
       throw new Error('No active collection profile selected.')
     }
-
-    const csvText = await file.text()
-    const parsed = parseArchidektCsv(csvText)
-    if (!parsed.rows.length) {
-      throw new Error('No importable rows found in the selected CSV.')
+    if (!rows.length) {
+      throw new Error('No importable rows were provided.')
     }
 
     setErrorMessage('')
@@ -920,17 +957,13 @@ function App() {
     try {
       const cards = await importCollectionRows({
         profileId: activeProfile.id,
-        rows: parsed.rows,
+        rows,
       })
       setOwnedCards(asCardMap(cards))
-      return {
-        rowsImported: parsed.rowsImported,
-        copiesImported: parsed.copiesImported,
-        rowsSkipped: parsed.rowsSkipped,
-      }
+      await hydrateMissingPricesForProfile(activeProfile.id, cards, { force: true })
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Unable to import Archidekt CSV.'
+        error instanceof Error ? error.message : 'Unable to import mapped collection rows.'
       setErrorMessage(message)
       throw new Error(message)
     } finally {
@@ -1075,7 +1108,7 @@ function App() {
                 onClick={() =>
                   isSyncing ? handleCancelSync() : void handleRefreshCollectionPrices()
                 }
-                disabled={!isSyncing && !refreshEnabled}
+                disabled={false}
                 title={isSyncing ? 'Cancel sync' : refreshTitle}
                 aria-label={isSyncing ? 'Cancel sync' : 'Refresh catalog data build'}
               >
@@ -1111,11 +1144,12 @@ function App() {
             onDecrement={handleDecrementCardQuantity}
             onAddPrinting={handleAddCard}
             onRemove={handleRemoveCard}
+            onRemoveSelected={handleRemoveCards}
             onTagCard={handleTagCard}
             onUpdateMetadata={handleUpdateCardMetadata}
             onBulkUpdateMetadata={handleBulkUpdateCardMetadata}
             onOpenMarket={() => setActiveTab('market')}
-            onImportArchidektCsv={handleImportArchidektCsv}
+            onImportCollectionRows={handleImportCollectionRows}
             onHydrateTypeMetadata={handleHydrateTypeMetadata}
             onUndoLastAction={handleUndoLastAction}
             canUndo={undoStack.length > 0}

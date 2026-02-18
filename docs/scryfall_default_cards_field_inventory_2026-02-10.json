@@ -1,0 +1,929 @@
+{
+  "source_file": "c:\\Users\\josep\\MagicCollectionProject\\magiccollection-desktop\\logs\\scryfall-test\\default_cards.json",
+  "generated_at": "2026-02-10",
+  "record_count": 112134,
+  "top_level_keys": [
+    {
+      "key": "artist",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "booster",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "border_color",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "collector_number",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "color_identity",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "digital",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "finishes",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "foil",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "frame",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "full_art",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "game_changer",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "games",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "highres_image",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "id",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "image_status",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "keywords",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "lang",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "layout",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "legalities",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "multiverse_ids",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "name",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "nonfoil",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "object",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "oversized",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "prices",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "prints_search_uri",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "promo",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "rarity",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "related_uris",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "released_at",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "reprint",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "reserved",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "rulings_uri",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "scryfall_set_uri",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "scryfall_uri",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "set",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "set_id",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "set_name",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "set_search_uri",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "set_type",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "set_uri",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "story_spotlight",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "textless",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "uri",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "variation",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "cmc",
+      "count": 112053,
+      "pct": 99.9278
+    },
+    {
+      "key": "oracle_id",
+      "count": 112053,
+      "pct": 99.9278
+    },
+    {
+      "key": "type_line",
+      "count": 112053,
+      "pct": 99.9278
+    },
+    {
+      "key": "artist_ids",
+      "count": 111278,
+      "pct": 99.2366
+    },
+    {
+      "key": "purchase_uris",
+      "count": 108427,
+      "pct": 96.6941
+    },
+    {
+      "key": "card_back_id",
+      "count": 108131,
+      "pct": 96.4302
+    },
+    {
+      "key": "colors",
+      "count": 108131,
+      "pct": 96.4302
+    },
+    {
+      "key": "image_uris",
+      "count": 108131,
+      "pct": 96.4302
+    },
+    {
+      "key": "mana_cost",
+      "count": 108131,
+      "pct": 96.4302
+    },
+    {
+      "key": "illustration_id",
+      "count": 107430,
+      "pct": 95.805
+    },
+    {
+      "key": "oracle_text",
+      "count": 107338,
+      "pct": 95.723
+    },
+    {
+      "key": "edhrec_rank",
+      "count": 98007,
+      "pct": 87.4017
+    },
+    {
+      "key": "tcgplayer_id",
+      "count": 95853,
+      "pct": 85.4808
+    },
+    {
+      "key": "cardmarket_id",
+      "count": 88616,
+      "pct": 79.0269
+    },
+    {
+      "key": "penny_rank",
+      "count": 64835,
+      "pct": 57.8192
+    },
+    {
+      "key": "mtgo_id",
+      "count": 58699,
+      "pct": 52.3472
+    },
+    {
+      "key": "power",
+      "count": 52854,
+      "pct": 47.1347
+    },
+    {
+      "key": "toughness",
+      "count": 52854,
+      "pct": 47.1347
+    },
+    {
+      "key": "flavor_text",
+      "count": 52506,
+      "pct": 46.8243
+    },
+    {
+      "key": "security_stamp",
+      "count": 39749,
+      "pct": 35.4478
+    },
+    {
+      "key": "promo_types",
+      "count": 29415,
+      "pct": 26.232
+    },
+    {
+      "key": "mtgo_foil_id",
+      "count": 24311,
+      "pct": 21.6803
+    },
+    {
+      "key": "frame_effects",
+      "count": 21034,
+      "pct": 18.7579
+    },
+    {
+      "key": "all_parts",
+      "count": 19773,
+      "pct": 17.6334
+    },
+    {
+      "key": "produced_mana",
+      "count": 17372,
+      "pct": 15.4922
+    },
+    {
+      "key": "arena_id",
+      "count": 16500,
+      "pct": 14.7145
+    },
+    {
+      "key": "preview",
+      "count": 16395,
+      "pct": 14.6209
+    },
+    {
+      "key": "watermark",
+      "count": 6992,
+      "pct": 6.2354
+    },
+    {
+      "key": "card_faces",
+      "count": 4796,
+      "pct": 4.277
+    },
+    {
+      "key": "resource_id",
+      "count": 3191,
+      "pct": 2.8457
+    },
+    {
+      "key": "printed_name",
+      "count": 2443,
+      "pct": 2.1786
+    },
+    {
+      "key": "loyalty",
+      "count": 1535,
+      "pct": 1.3689
+    },
+    {
+      "key": "tcgplayer_etched_id",
+      "count": 1225,
+      "pct": 1.0924
+    },
+    {
+      "key": "flavor_name",
+      "count": 520,
+      "pct": 0.4637
+    },
+    {
+      "key": "printed_text",
+      "count": 436,
+      "pct": 0.3888
+    },
+    {
+      "key": "printed_type_line",
+      "count": 286,
+      "pct": 0.2551
+    },
+    {
+      "key": "attraction_lights",
+      "count": 135,
+      "pct": 0.1204
+    },
+    {
+      "key": "color_indicator",
+      "count": 127,
+      "pct": 0.1133
+    },
+    {
+      "key": "hand_modifier",
+      "count": 119,
+      "pct": 0.1061
+    },
+    {
+      "key": "life_modifier",
+      "count": 119,
+      "pct": 0.1061
+    },
+    {
+      "key": "variation_of",
+      "count": 96,
+      "pct": 0.0856
+    },
+    {
+      "key": "content_warning",
+      "count": 29,
+      "pct": 0.0259
+    },
+    {
+      "key": "defense",
+      "count": 1,
+      "pct": 0.0009
+    }
+  ],
+  "prices_keys": [
+    {
+      "key": "eur",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "eur_foil",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "tix",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "usd",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "usd_etched",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "usd_foil",
+      "count": 112134,
+      "pct": 100.0
+    }
+  ],
+  "legalities_keys": [
+    {
+      "key": "alchemy",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "brawl",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "commander",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "duel",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "future",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "gladiator",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "historic",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "legacy",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "modern",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "oathbreaker",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "oldschool",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "pauper",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "paupercommander",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "penny",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "pioneer",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "predh",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "premodern",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "standard",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "standardbrawl",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "timeless",
+      "count": 112134,
+      "pct": 100.0
+    },
+    {
+      "key": "vintage",
+      "count": 112134,
+      "pct": 100.0
+    }
+  ],
+  "image_uris_keys": [
+    {
+      "key": "art_crop",
+      "count": 108131,
+      "pct": 96.4302
+    },
+    {
+      "key": "border_crop",
+      "count": 108131,
+      "pct": 96.4302
+    },
+    {
+      "key": "large",
+      "count": 108131,
+      "pct": 96.4302
+    },
+    {
+      "key": "normal",
+      "count": 108131,
+      "pct": 96.4302
+    },
+    {
+      "key": "png",
+      "count": 108131,
+      "pct": 96.4302
+    },
+    {
+      "key": "small",
+      "count": 108131,
+      "pct": 96.4302
+    }
+  ],
+  "card_faces_keys": [
+    {
+      "key": "mana_cost",
+      "count": 9601,
+      "pct": 8.5621
+    },
+    {
+      "key": "name",
+      "count": 9601,
+      "pct": 8.5621
+    },
+    {
+      "key": "object",
+      "count": 9601,
+      "pct": 8.5621
+    },
+    {
+      "key": "oracle_text",
+      "count": 9601,
+      "pct": 8.5621
+    },
+    {
+      "key": "type_line",
+      "count": 9586,
+      "pct": 8.5487
+    },
+    {
+      "key": "artist",
+      "count": 9264,
+      "pct": 8.2615
+    },
+    {
+      "key": "artist_id",
+      "count": 9264,
+      "pct": 8.2615
+    },
+    {
+      "key": "illustration_id",
+      "count": 8271,
+      "pct": 7.376
+    },
+    {
+      "key": "colors",
+      "count": 8006,
+      "pct": 7.1397
+    },
+    {
+      "key": "image_uris",
+      "count": 7682,
+      "pct": 6.8507
+    },
+    {
+      "key": "power",
+      "count": 2287,
+      "pct": 2.0395
+    },
+    {
+      "key": "toughness",
+      "count": 2287,
+      "pct": 2.0395
+    },
+    {
+      "key": "flavor_text",
+      "count": 1221,
+      "pct": 1.0889
+    },
+    {
+      "key": "color_indicator",
+      "count": 891,
+      "pct": 0.7946
+    },
+    {
+      "key": "watermark",
+      "count": 220,
+      "pct": 0.1962
+    },
+    {
+      "key": "cmc",
+      "count": 162,
+      "pct": 0.1445
+    },
+    {
+      "key": "layout",
+      "count": 162,
+      "pct": 0.1445
+    },
+    {
+      "key": "oracle_id",
+      "count": 162,
+      "pct": 0.1445
+    },
+    {
+      "key": "loyalty",
+      "count": 139,
+      "pct": 0.124
+    },
+    {
+      "key": "defense",
+      "count": 54,
+      "pct": 0.0482
+    },
+    {
+      "key": "flavor_name",
+      "count": 28,
+      "pct": 0.025
+    },
+    {
+      "key": "printed_name",
+      "count": 28,
+      "pct": 0.025
+    },
+    {
+      "key": "printed_text",
+      "count": 26,
+      "pct": 0.0232
+    },
+    {
+      "key": "printed_type_line",
+      "count": 6,
+      "pct": 0.0054
+    }
+  ],
+  "all_parts_keys": [
+    {
+      "key": "component",
+      "count": 145339,
+      "pct": 129.6119
+    },
+    {
+      "key": "id",
+      "count": 145339,
+      "pct": 129.6119
+    },
+    {
+      "key": "name",
+      "count": 145339,
+      "pct": 129.6119
+    },
+    {
+      "key": "object",
+      "count": 145339,
+      "pct": 129.6119
+    },
+    {
+      "key": "type_line",
+      "count": 145339,
+      "pct": 129.6119
+    },
+    {
+      "key": "uri",
+      "count": 145339,
+      "pct": 129.6119
+    }
+  ],
+  "sample_single_face": {
+    "id": "0000419b-0bba-4488-8f7a-6194544ce91e",
+    "name": "Forest",
+    "layout": "normal",
+    "set": "blb",
+    "collector_number": "280",
+    "top_level_keys": [
+      "arena_id",
+      "artist",
+      "artist_ids",
+      "booster",
+      "border_color",
+      "card_back_id",
+      "cardmarket_id",
+      "cmc",
+      "collector_number",
+      "color_identity",
+      "colors",
+      "digital",
+      "finishes",
+      "foil",
+      "frame",
+      "full_art",
+      "game_changer",
+      "games",
+      "highres_image",
+      "id",
+      "illustration_id",
+      "image_status",
+      "image_uris",
+      "keywords",
+      "lang",
+      "layout",
+      "legalities",
+      "mana_cost",
+      "mtgo_id",
+      "multiverse_ids",
+      "name",
+      "nonfoil",
+      "object",
+      "oracle_id",
+      "oracle_text",
+      "oversized",
+      "prices",
+      "prints_search_uri",
+      "produced_mana",
+      "promo",
+      "purchase_uris",
+      "rarity",
+      "related_uris",
+      "released_at",
+      "reprint",
+      "reserved",
+      "rulings_uri",
+      "scryfall_set_uri",
+      "scryfall_uri",
+      "set",
+      "set_id",
+      "set_name",
+      "set_search_uri",
+      "set_type",
+      "set_uri",
+      "story_spotlight",
+      "tcgplayer_id",
+      "textless",
+      "type_line",
+      "uri",
+      "variation"
+    ]
+  },
+  "sample_multi_face": {
+    "id": "0001e77a-7fff-49d2-a55c-42f6fdf6db08",
+    "name": "Obyra's Attendants // Desperate Parry",
+    "layout": "adventure",
+    "set": "woe",
+    "collector_number": "63",
+    "top_level_keys": [
+      "all_parts",
+      "arena_id",
+      "artist",
+      "artist_ids",
+      "booster",
+      "border_color",
+      "card_back_id",
+      "card_faces",
+      "cardmarket_id",
+      "cmc",
+      "collector_number",
+      "color_identity",
+      "colors",
+      "digital",
+      "edhrec_rank",
+      "finishes",
+      "flavor_text",
+      "foil",
+      "frame",
+      "full_art",
+      "game_changer",
+      "games",
+      "highres_image",
+      "id",
+      "illustration_id",
+      "image_status",
+      "image_uris",
+      "keywords",
+      "lang",
+      "layout",
+      "legalities",
+      "mana_cost",
+      "mtgo_id",
+      "multiverse_ids",
+      "name",
+      "nonfoil",
+      "object",
+      "oracle_id",
+      "oversized",
+      "power",
+      "prices",
+      "prints_search_uri",
+      "promo",
+      "purchase_uris",
+      "rarity",
+      "related_uris",
+      "released_at",
+      "reprint",
+      "reserved",
+      "rulings_uri",
+      "scryfall_set_uri",
+      "scryfall_uri",
+      "set",
+      "set_id",
+      "set_name",
+      "set_search_uri",
+      "set_type",
+      "set_uri",
+      "story_spotlight",
+      "tcgplayer_id",
+      "textless",
+      "toughness",
+      "type_line",
+      "uri",
+      "variation"
+    ],
+    "card_faces_keys": [
+      "artist",
+      "artist_id",
+      "flavor_text",
+      "illustration_id",
+      "mana_cost",
+      "name",
+      "object",
+      "oracle_text",
+      "power",
+      "toughness",
+      "type_line"
+    ]
+  }
+}

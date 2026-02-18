@@ -1,153 +1,162 @@
 ﻿# MagicCollection Architecture
 
-Date: 2026-02-09
-Status: Alpha Desktop Architecture (Local-First)
+Last updated: 2026-02-10
+Status: Alpha desktop-first, local-first architecture
 
-## 1) Architecture Scope
-This document defines the current full stack for the desktop prototype and the intended evolution path.
+## Executive Summary
 
-Current focus:
-1. Windows desktop app.
-2. Local storage and local sync service.
-3. No cloud deployment dependency for prototype completion.
+MagicCollection is currently a desktop app focused on speed and offline reliability.
 
-## 2) System Overview
-The system is split into 4 runtime layers:
-1. Desktop UI layer (React + TypeScript).
-2. Native bridge/runtime layer (Tauri).
-3. Local data/service layer (Rust commands + SQLite + optional local Python sync service).
-4. External data providers (Scryfall, CK public buylist).
+- UI: React + TypeScript
+- App runtime: Tauri (Rust bridge)
+- Data: local SQLite
+- Providers: Scryfall + Card Kingdom public buylist
+- Sync model: server-produced snapshot/patch artifacts applied locally
 
-## 3) Runtime Components
+The long-term goal is shared contracts so desktop, web, and mobile all use the same data semantics.
 
-## 3.1 Desktop Client (`magiccollection-desktop`)
-Frontend:
-1. React 19 + TypeScript.
-2. Vite bundling.
-3. Views:
-- Collection
-- Market
-- Reports
-- Settings
+## Architecture Map
 
-Desktop shell:
-1. Tauri v2.
-2. Command bridge via `@tauri-apps/api` invoke.
+```mermaid
+flowchart LR
+  subgraph Client[Desktop Client]
+    UI[React UI]
+    TAURI[Tauri Command Bridge]
+  end
 
-Local persistence:
-1. SQLite via Rust (`rusqlite`, bundled SQLite).
-2. Browser fallback localStorage only for non-Tauri contexts.
+  subgraph Local[Local Runtime]
+    RUST[Rust domain commands]
+    DB[(SQLite)]
+    CACHE[Local cache files]
+  end
 
-## 3.2 Local Sync Service (`sync-service`)
-Purpose:
-1. Build and serve versioned catalog snapshots/patches locally.
+  subgraph External[External Services]
+    SCRY[Scryfall API]
+    CK[Card Kingdom API]
+    SYNC[Patch/Snapshot Service]
+  end
 
-Components:
-1. `sync_pipeline.py`:
-- ingest/normalize Scryfall bulk data
-- generate incremental patches
-- generate compacted patches
-- emit manifest and version index
-2. `server.py`:
-- local HTTP endpoints for status/patch/snapshot
-- basic health/metrics/rate limiting
+  UI --> TAURI
+  TAURI --> RUST
+  RUST --> DB
+  RUST --> CACHE
 
-Note:
-Cloudflare worker scaffold exists but is deferred for prototype priorities.
+  RUST --> SCRY
+  RUST --> CK
+  RUST --> SYNC
+```
 
-## 3.3 Shared Contracts (`shared-core`)
-Current state:
-1. Documentation-level scaffolding exists.
-2. Planned extraction target for sync/domain contracts across desktop/web/mobile.
+## Runtime Layers
 
-## 4) Data Stores
+| Layer | Tech | Responsibility |
+|---|---|---|
+| Presentation | React 19 + TypeScript + Vite | Collection, Market, Reports, Settings UI and interaction logic. |
+| Desktop shell | Tauri v2 + `@tauri-apps/api` | Windowing, native command invoke, packaging. |
+| Domain/service | Rust (`src-tauri/src/lib.rs`) | Profile CRUD, collection mutation, metadata hydration, pricing, sync apply. |
+| Persistence | SQLite (`rusqlite`) | Source of truth for `collection_data_*`, `card_data_*`, and `system_data_sync_*`. |
+| Local sync tooling | Python `sync-service` | Build daily artifacts (snapshots, patches, compacted patches). |
+| Upstream providers | Scryfall, CK public API | Card metadata/images + buylist market data. |
 
-## 4.1 Primary Store (Desktop)
-SQLite database file in Tauri app data directory.
+## Core Flows
 
-Key domains:
-1. Profiles.
-2. Owned items and metadata.
-3. Tags and locations.
-4. Price snapshots.
-5. Catalog sync state + patch history.
+## 1) Collection mutation flow
 
-## 4.2 Local Service Artifacts
-`sync-service/data`:
-1. versioned snapshots.
-2. patches/compacted patches.
-3. manifest and version index.
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant FE as React UI
+  participant BE as Rust Command
+  participant DB as SQLite
 
-## 5) External Provider Integrations
+  U->>FE: + / - / edit / tag
+  FE->>BE: invoke command
+  BE->>DB: transactional write
+  BE->>DB: refresh filter token derivations
+  BE-->>FE: updated collection payload
+```
 
-## 5.1 Scryfall
-Used for:
-1. card metadata.
-2. image URLs/fallbacks.
-3. collection price refresh/fetch.
-4. bulk data source for local pipeline.
+## 2) Metadata hydration flow (Scryfall)
 
-## 5.2 Card Kingdom (Public Buylist)
-Used for:
-1. buylist quote ingestion via desktop backend command.
-2. cached pricelist to reduce repeated network calls.
+```mermaid
+sequenceDiagram
+  participant FE as Collection UI
+  participant BE as Rust Command
+  participant SCRY as Scryfall /cards/collection
+  participant DB as SQLite
 
-Design note:
-CK data should be one selectable source within broader pricing strategy, not the only report path.
+  FE->>BE: hydrate_profile_card_metadata(profile)
+  BE->>DB: find owned rows missing type/rarity/image metadata
+  loop batched ids (<=75)
+    BE->>SCRY: POST collection identifiers
+    SCRY-->>BE: metadata payload
+    BE->>DB: update cards + printings
+  end
+  BE->>DB: sync filter tokens
+  BE-->>FE: hydration result (attempted/hydrated/remaining)
+```
 
-## 6) Core App Flows
+## 3) Catalog sync flow
 
-## 6.1 Startup/Auth/Profile
-1. Launch app.
-2. Local auth gate (login-first UI).
-3. Select/open collection profile.
-4. Load collection state from SQLite.
+```mermaid
+sequenceDiagram
+  participant FE as UI Sync Action
+  participant SYNC as Patch Server
+  participant BE as Rust Sync Commands
+  participant DB as SQLite
 
-## 6.2 Collection Mutation Flow
-1. User action (+/-/tag/edit/remove).
-2. Optimistic UI update where applicable.
-3. Tauri command writes SQLite transaction.
-4. UI refreshes from authoritative DB response.
-5. Undo history records reversible state snapshot.
+  FE->>SYNC: request latest version metadata
+  FE->>BE: apply snapshot or patch
+  BE->>DB: update `card_data_*` rows in transaction
+  BE->>DB: write `system_data_sync_client_sync_state`
+  BE->>DB: append `system_data_sync_patch_apply_history`
+  BE-->>FE: result + version/hash
+```
 
-## 6.3 Catalog Sync Flow (Current)
-1. UI requests sync status.
-2. Sync engine resolves strategy (`noop/chain/compacted/full`).
-3. Patch/snapshot applied transactionally to catalog tables.
-4. Post-apply diagnostics updated.
-5. Collection prices refreshed from local catalog + provider fallback.
+## Current Project Boundaries
 
-## 6.4 Pricing Flow
-1. Provider data fetched (Scryfall and/or CK).
-2. Price snapshots recorded.
-3. Collection/market/reports consume normalized price view.
-4. Provider source selection will be user-configurable (in progress).
+In scope now:
+1. Desktop UX and local-first reliability.
+2. Fast collection operations for large inventories.
+3. Search/filter quality (Scryfall-style plus human-friendly autocomplete).
+4. Patch-ready local catalog sync model.
 
-## 7) Dependency Inventory
+Deferred intentionally:
+1. Cloud-hosted auth and account sync.
+2. Full web/mobile deployment.
+3. Multi-provider commercial pricing orchestration beyond initial adapters.
 
-## 7.1 Frontend Dependencies (`magiccollection-desktop/package.json`)
+## Data Boundaries
+
+- Local canonical store: SQLite (`magiccollection.db`).
+- Browser/local dev fallback: lightweight localStorage only where desktop runtime is unavailable.
+- External provider data is cached and normalized before entering UI state.
+
+Related deep-dive:
+- See `DATABASE_SCHEMA.md` for table/column details and ER mapping.
+
+## Dependency Summary
+
+## Frontend (`magiccollection-desktop/package.json`)
 Runtime:
 1. `react`
 2. `react-dom`
 3. `@tauri-apps/api`
 
-Build/Tooling:
+Tooling:
 1. `vite`
 2. `typescript`
-3. `eslint` + `typescript-eslint`
+3. `eslint` and `typescript-eslint`
 4. `@vitejs/plugin-react`
 5. `@tauri-apps/cli`
-6. React/Node type packages
 
-## 7.2 Rust/Tauri Dependencies (`magiccollection-desktop/src-tauri/Cargo.toml`)
+## Backend (`magiccollection-desktop/src-tauri/Cargo.toml`)
 Core:
 1. `tauri`
 2. `tauri-plugin-log`
-3. `serde`
-4. `serde_json`
-5. `log`
+3. `serde`, `serde_json`
+4. `log`
 
-Data + IDs:
+Data and identity:
 1. `rusqlite` (bundled SQLite)
 2. `uuid`
 3. `chrono`
@@ -156,37 +165,31 @@ Data + IDs:
 Network:
 1. `reqwest` (blocking + rustls)
 
-## 7.3 Sync Service Dependencies
-Language/runtime:
-1. Python 3 (standard library modules used).
+## Sync tooling (`sync-service`)
+1. Python runtime.
+2. Local HTTP server script for artifact serving.
+3. Optional Cloudflare scaffold exists but not required for prototype phase.
 
-Optional deferred runtime:
-1. Cloudflare Worker stack (`wrangler`, TS worker) under `sync-service/cloudflare`.
+## Deployment Modes
 
-## 8) Local Deployment Model (Prototype)
+## Mode A: Desktop-only
+- Run Tauri app.
+- All state local.
 
-## 8.1 Desktop-Only
-1. Run Tauri app.
-2. Use local SQLite as source of truth.
+## Mode B: Desktop + local sync server
+- Run `sync-service` pipeline/server locally.
+- Desktop consumes local patch/snapshot endpoint.
 
-## 8.2 Desktop + Local Sync Server
-1. Run `sync_pipeline.py` to generate/update artifacts.
-2. Run `server.py` locally.
-3. Point desktop sync endpoint to local server.
+## Planned Evolution (After prototype)
 
-## 9) Non-Goals (Current Phase)
-1. No mandatory cloud hosting.
-2. No mandatory cloud auth.
-3. No cross-device account sync requirement for prototype acceptance.
+1. Extract shared contracts from desktop into `shared-core` for reuse.
+2. Add hosted sync endpoint and artifact distribution.
+3. Add cloud account linking on top of offline local auth.
+4. Reuse same domain contracts for web and mobile clients.
 
-## 10) Future Evolution (After Prototype Sign-Off)
-1. Harden shared-core contracts.
-2. Add hosted sync server deployment.
-3. Add cloud account linking on top of local offline-first auth.
-4. Extend same contracts to web/mobile clients.
+## Engineering Conventions
 
-## 11) Engineering Conventions
-1. Keep Windows-native workflows first.
-2. Keep changelog and roadmap current after each major feature group.
-3. Favor transactional DB writes and deterministic recovery paths.
-4. Add concise comments for non-obvious logic in sync, pricing, and mutation pipelines.
+1. Windows-first workflows for development and packaging.
+2. Keep `CHANGELOG.md` and `NEXT_STEPS.md` updated after each major feature batch.
+3. Prefer transactional DB operations and deterministic sync outcomes.
+4. Keep comments concise and focused on non-obvious behavior.

@@ -1,0 +1,262 @@
+{
+  "exports": [
+    {
+      "backend_fn": "listProfiles",
+      "tauri_command": "list_profiles"
+    },
+    {
+      "backend_fn": "createProfile",
+      "tauri_command": "create_profile"
+    },
+    {
+      "backend_fn": "getCollection",
+      "tauri_command": "get_collection"
+    },
+    {
+      "backend_fn": "addCardToCollection",
+      "tauri_command": "add_card_to_collection"
+    },
+    {
+      "backend_fn": "updateCardQuantity",
+      "tauri_command": "update_card_quantity"
+    },
+    {
+      "backend_fn": "removeCardFromCollection",
+      "tauri_command": "remove_card_from_collection"
+    },
+    {
+      "backend_fn": "removeCardsFromCollection",
+      "tauri_command": "remove_cards_from_collection"
+    },
+    {
+      "backend_fn": "recordMarketSnapshots",
+      "tauri_command": "record_market_snapshots"
+    },
+    {
+      "backend_fn": "getMarketPriceTrends",
+      "tauri_command": "get_market_price_trends"
+    },
+    {
+      "backend_fn": "getCollectionPriceTrendsBySource",
+      "tauri_command": "get_collection_price_trends_by_source"
+    },
+    {
+      "backend_fn": "syncCkPricesIntoCardData",
+      "tauri_command": "sync_ck_prices_into_card_data"
+    },
+    {
+      "backend_fn": "syncAllSourcesNow",
+      "tauri_command": "sync_all_sources_now"
+    },
+    {
+      "backend_fn": "importCollectionRows",
+      "tauri_command": "import_collection_rows"
+    },
+    {
+      "backend_fn": "bulkUpdateTags",
+      "tauri_command": "bulk_update_tags"
+    },
+    {
+      "backend_fn": "updateOwnedCardMetadata",
+      "tauri_command": "update_owned_card_metadata"
+    },
+    {
+      "backend_fn": "setOwnedCardState",
+      "tauri_command": "set_owned_card_state"
+    },
+    {
+      "backend_fn": "syncFilterTokens",
+      "tauri_command": "sync_filter_tokens"
+    },
+    {
+      "backend_fn": "getFilterTokens",
+      "tauri_command": "get_filter_tokens"
+    },
+    {
+      "backend_fn": "hydrateProfileCardMetadata",
+      "tauri_command": "hydrate_profile_card_metadata"
+    }
+  ],
+  "usage": [
+    {
+      "file": "App.tsx",
+      "line": 370,
+      "backend_fn": "listProfiles",
+      "tauri_command": "list_profiles"
+    },
+    {
+      "file": "App.tsx",
+      "line": 498,
+      "backend_fn": "listProfiles",
+      "tauri_command": "list_profiles"
+    },
+    {
+      "file": "App.tsx",
+      "line": 493,
+      "backend_fn": "createProfile",
+      "tauri_command": "create_profile"
+    },
+    {
+      "file": "App.tsx",
+      "line": 203,
+      "backend_fn": "getCollection",
+      "tauri_command": "get_collection"
+    },
+    {
+      "file": "App.tsx",
+      "line": 387,
+      "backend_fn": "getCollection",
+      "tauri_command": "get_collection"
+    },
+    {
+      "file": "App.tsx",
+      "line": 499,
+      "backend_fn": "getCollection",
+      "tauri_command": "get_collection"
+    },
+    {
+      "file": "App.tsx",
+      "line": 524,
+      "backend_fn": "getCollection",
+      "tauri_command": "get_collection"
+    },
+    {
+      "file": "App.tsx",
+      "line": 824,
+      "backend_fn": "getCollection",
+      "tauri_command": "get_collection"
+    },
+    {
+      "file": "App.tsx",
+      "line": 856,
+      "backend_fn": "getCollection",
+      "tauri_command": "get_collection"
+    },
+    {
+      "file": "App.tsx",
+      "line": 618,
+      "backend_fn": "addCardToCollection",
+      "tauri_command": "add_card_to_collection"
+    },
+    {
+      "file": "App.tsx",
+      "line": 645,
+      "backend_fn": "updateCardQuantity",
+      "tauri_command": "update_card_quantity"
+    },
+    {
+      "file": "App.tsx",
+      "line": 675,
+      "backend_fn": "updateCardQuantity",
+      "tauri_command": "update_card_quantity"
+    },
+    {
+      "file": "App.tsx",
+      "line": 705,
+      "backend_fn": "removeCardFromCollection",
+      "tauri_command": "remove_card_from_collection"
+    },
+    {
+      "file": "App.tsx",
+      "line": 859,
+      "backend_fn": "removeCardFromCollection",
+      "tauri_command": "remove_card_from_collection"
+    },
+    {
+      "file": "App.tsx",
+      "line": 734,
+      "backend_fn": "removeCardsFromCollection",
+      "tauri_command": "remove_cards_from_collection"
+    },
+    {
+      "file": "App.tsx",
+      "line": 247,
+      "backend_fn": "recordMarketSnapshots",
+      "tauri_command": "record_market_snapshots"
+    },
+    {
+      "file": "App.tsx",
+      "line": 297,
+      "backend_fn": "recordMarketSnapshots",
+      "tauri_command": "record_market_snapshots"
+    },
+    {
+      "file": "App.tsx",
+      "line": 306,
+      "backend_fn": "syncCkPricesIntoCardData",
+      "tauri_command": "sync_ck_prices_into_card_data"
+    },
+    {
+      "file": "App.tsx",
+      "line": 901,
+      "backend_fn": "syncAllSourcesNow",
+      "tauri_command": "sync_all_sources_now"
+    },
+    {
+      "file": "App.tsx",
+      "line": 958,
+      "backend_fn": "importCollectionRows",
+      "tauri_command": "import_collection_rows"
+    },
+    {
+      "file": "App.tsx",
+      "line": 763,
+      "backend_fn": "bulkUpdateTags",
+      "tauri_command": "bulk_update_tags"
+    },
+    {
+      "file": "App.tsx",
+      "line": 794,
+      "backend_fn": "updateOwnedCardMetadata",
+      "tauri_command": "update_owned_card_metadata"
+    },
+    {
+      "file": "App.tsx",
+      "line": 826,
+      "backend_fn": "updateOwnedCardMetadata",
+      "tauri_command": "update_owned_card_metadata"
+    },
+    {
+      "file": "App.tsx",
+      "line": 865,
+      "backend_fn": "setOwnedCardState",
+      "tauri_command": "set_owned_card_state"
+    },
+    {
+      "file": "App.tsx",
+      "line": 331,
+      "backend_fn": "hydrateProfileCardMetadata",
+      "tauri_command": "hydrate_profile_card_metadata"
+    },
+    {
+      "file": "CollectionPage.tsx",
+      "line": 1151,
+      "backend_fn": "getCollectionPriceTrendsBySource",
+      "tauri_command": "get_collection_price_trends_by_source"
+    },
+    {
+      "file": "CollectionPage.tsx",
+      "line": 1395,
+      "backend_fn": "syncFilterTokens",
+      "tauri_command": "sync_filter_tokens"
+    },
+    {
+      "file": "CollectionPage.tsx",
+      "line": 1423,
+      "backend_fn": "getFilterTokens",
+      "tauri_command": "get_filter_tokens"
+    },
+    {
+      "file": "MarketPage.tsx",
+      "line": 207,
+      "backend_fn": "recordMarketSnapshots",
+      "tauri_command": "record_market_snapshots"
+    },
+    {
+      "file": "MarketPage.tsx",
+      "line": 208,
+      "backend_fn": "getMarketPriceTrends",
+      "tauri_command": "get_market_price_trends"
+    }
+  ]
+}

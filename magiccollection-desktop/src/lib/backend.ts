@@ -300,7 +300,7 @@ async function fallbackImportCollectionRows(input: {
       name: existing?.name ?? row.name,
       setCode: existing?.setCode ?? row.setCode,
       collectorNumber: existing?.collectorNumber ?? row.collectorNumber,
-      imageUrl: existing?.imageUrl,
+      imageUrl: existing?.imageUrl ?? row.imageUrl ?? undefined,
       typeLine: existing?.typeLine ?? row.typeLine ?? null,
       colorIdentity:
         existing?.colorIdentity && existing.colorIdentity.length
@@ -311,6 +311,15 @@ async function fallbackImportCollectionRows(input: {
       quantity: Math.max(0, (existing?.quantity ?? 0) + row.quantity),
       foilQuantity: Math.max(0, (existing?.foilQuantity ?? 0) + row.foilQuantity),
       tags: [...new Set([...(existing?.tags ?? []), ...(row.tags ?? [])])],
+      conditionCode: row.conditionCode ?? existing?.conditionCode ?? 'NM',
+      language: row.language ?? existing?.language ?? 'en',
+      locationName: row.locationName ?? existing?.locationName ?? null,
+      notes: row.notes ?? existing?.notes ?? null,
+      purchasePrice:
+        typeof row.purchasePrice === 'number' && Number.isFinite(row.purchasePrice)
+          ? row.purchasePrice
+          : existing?.purchasePrice ?? null,
+      dateAdded: row.dateAdded ?? existing?.dateAdded ?? null,
       updatedAt: nowIso(),
     })
     current[row.scryfallId] = next
@@ -488,6 +497,24 @@ export async function removeCardFromCollection(input: {
   return invoke<OwnedCard[]>('remove_card_from_collection', { input })
 }
 
+export async function removeCardsFromCollection(input: {
+  profileId: string
+  scryfallIds: string[]
+}): Promise<OwnedCard[]> {
+  if (!input.scryfallIds.length) {
+    return getCollection(input.profileId)
+  }
+  if (!hasTauriRuntime()) {
+    const current = loadCollection(input.profileId)
+    for (const id of input.scryfallIds) {
+      delete current[id]
+    }
+    saveCollection(input.profileId, current)
+    return fallbackGetCollection(input.profileId)
+  }
+  return invoke<OwnedCard[]>('remove_cards_from_collection', { input })
+}
+
 export async function recordMarketSnapshots(
   snapshots: MarketSnapshotInput[],
 ): Promise<void> {
@@ -512,6 +539,66 @@ export async function getMarketPriceTrends(
   return invoke<MarketTrend[]>('get_market_price_trends', {
     scryfallIds,
   })
+}
+
+export async function getCollectionPriceTrendsBySource(input: {
+  profileId: string
+  sourceId: 'tcg-low' | 'tcg-market' | 'tcg-high' | 'ck-sell' | 'ck-buylist'
+}): Promise<MarketTrend[]> {
+  if (!hasTauriRuntime()) {
+    return []
+  }
+  return invoke<MarketTrend[]>('get_collection_price_trends_by_source', {
+    profileId: input.profileId,
+    sourceId: input.sourceId,
+  })
+}
+
+export async function syncCkPricesIntoCardData(): Promise<{
+  scanned: number
+  upsertedBuylist: number
+  upsertedSell: number
+  skipped: number
+}> {
+  if (!hasTauriRuntime()) {
+    return { scanned: 0, upsertedBuylist: 0, upsertedSell: 0, skipped: 0 }
+  }
+  return invoke('sync_ck_prices_into_card_data')
+}
+
+export async function syncAllSourcesNow(): Promise<{
+  startedAt: string
+  finishedAt: string
+  syncVersion: string
+  scryfallScanned: number
+  scryfallUpdated: number
+  scryfallUnchanged: number
+  scryfallPriceSnapshots: number
+  tcgSetsScanned: number
+  tcgProductsMatched: number
+  tcgPriceUpserts: number
+  ckScanned: number
+  ckUpsertedBuylist: number
+  ckUpsertedSell: number
+}> {
+  if (!hasTauriRuntime()) {
+    return {
+      startedAt: nowIso(),
+      finishedAt: nowIso(),
+      syncVersion: 'local-dev',
+      scryfallScanned: 0,
+      scryfallUpdated: 0,
+      scryfallUnchanged: 0,
+      scryfallPriceSnapshots: 0,
+      tcgSetsScanned: 0,
+      tcgProductsMatched: 0,
+      tcgPriceUpserts: 0,
+      ckScanned: 0,
+      ckUpsertedBuylist: 0,
+      ckUpsertedSell: 0,
+    }
+  }
+  return invoke('sync_all_sources_now')
 }
 
 export async function importCollectionRows(input: {
@@ -570,7 +657,7 @@ function fallbackFilterTokens(query: string, limit = 30): FilterToken[] {
   const seed = [
     ['set:', 'Set code (example: set:neo)', 'scryfall'],
     ['t:', 'Type line (example: t:creature)', 'scryfall'],
-    ['tag:', 'Internal tag (example: tag:owned)', 'internal'],
+    ['tag:', 'Internal tag (example: tag:not_for_sale)', 'internal'],
     ['c:', 'Color identity (example: c:uw)', 'scryfall'],
     ['id:', 'Color identity exact-ish (example: id:g)', 'scryfall'],
     ['rarity:', 'Rarity (example: rarity:rare)', 'scryfall'],
@@ -599,7 +686,12 @@ function fallbackFilterTokens(query: string, limit = 30): FilterToken[] {
       source: 'derived',
       priority: 50,
     })
-    card.tags.forEach((tag) => {
+    card.tags
+      .filter((tag) => {
+        const normalized = tag.trim().toLowerCase()
+        return normalized !== 'owned' && normalized !== 'foil' && normalized !== 'playset'
+      })
+      .forEach((tag) => {
       const normalizedTag = tag.trim().toLowerCase()
       if (!normalizedTag) return
       tokens.set(`tag:${normalizedTag}`, {
@@ -609,7 +701,7 @@ function fallbackFilterTokens(query: string, limit = 30): FilterToken[] {
         source: 'derived',
         priority: 60,
       })
-    })
+      })
   })
 
   return [...tokens.values()]
